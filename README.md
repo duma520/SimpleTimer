@@ -6,7 +6,8 @@
 
 <img width="835" height="785" alt="image" src="https://github.com/user-attachments/assets/ed273850-1913-4a88-95e7-3b3d96582120" />
 
-<img width="829" height="781" alt="image" src="https://github.com/user-attachments/assets/3665017b-5202-47dc-bb91-9d1f923f66ed" />
+<img width="800" height="720" alt="image" src="https://github.com/user-attachments/assets/67c291e8-bc71-43e7-a4de-803653e43ccc" />
+
 
 # 《多功能计时器》全方位详细使用说明书
 
