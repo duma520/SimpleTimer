@@ -114,7 +114,12 @@ class SettingsManager:
             "recent_timers": [],
             "always_on_top": False,
             # 新增：最小化到托盘选项，默认值为 False
-            "minimize_to_tray": False
+            "minimize_to_tray": False,
+            # 新增：提醒方式设置
+            "window_shake": True,
+            "window_flash": True,
+            "taskbar_flash": True,
+            "show_alert_dialog": True
         }
         self.settings = self.load_settings()
     
@@ -177,6 +182,13 @@ class TimerWindow(QMainWindow):
         self.tray_icon = None
         self.taskbar_button = None
         self.taskbar_progress = None
+        
+        # 新增：动画相关属性
+        self.shake_animation = None
+        self.flash_timer = None
+        self.flash_count = 0
+        self.taskbar_timer = None
+        self.original_style = ""
         
         self.init_ui()
         self.load_settings()
@@ -524,6 +536,37 @@ class TimerWindow(QMainWindow):
         sound_group.setLayout(sound_layout)
         layout.addWidget(sound_group)
         
+        # 新增：提醒方式设置
+        alarm_group = QGroupBox('提醒方式设置')
+        alarm_layout = QVBoxLayout()
+        
+        self.window_shake_checkbox = QCheckBox('窗口抖动提醒')
+        self.window_shake_checkbox.stateChanged.connect(self.toggle_window_shake)
+        alarm_layout.addWidget(self.window_shake_checkbox)
+        
+        self.window_flash_checkbox = QCheckBox('窗口闪烁提醒')
+        self.window_flash_checkbox.stateChanged.connect(self.toggle_window_flash)
+        alarm_layout.addWidget(self.window_flash_checkbox)
+        
+        self.taskbar_flash_checkbox = QCheckBox('任务栏闪烁提醒')
+        self.taskbar_flash_checkbox.stateChanged.connect(self.toggle_taskbar_flash)
+        self.taskbar_flash_checkbox.setEnabled(sys.platform == 'win32')
+        if sys.platform != 'win32':
+            self.taskbar_flash_checkbox.setToolTip('仅Windows系统可用')
+        alarm_layout.addWidget(self.taskbar_flash_checkbox)
+        
+        self.alert_dialog_checkbox = QCheckBox('显示醒目提醒对话框')
+        self.alert_dialog_checkbox.stateChanged.connect(self.toggle_alert_dialog)
+        alarm_layout.addWidget(self.alert_dialog_checkbox)
+        
+        # 测试提醒按钮
+        test_alarm_btn = QPushButton('测试提醒效果')
+        test_alarm_btn.clicked.connect(self.test_alarm_effects)
+        alarm_layout.addWidget(test_alarm_btn)
+        
+        alarm_group.setLayout(alarm_layout)
+        layout.addWidget(alarm_group)
+        
         # 窗口设置
         window_group = QGroupBox('窗口设置')
         window_layout = QVBoxLayout()
@@ -716,6 +759,16 @@ class TimerWindow(QMainWindow):
         # 新增：加载最小化到托盘设置
         self.minimize_to_tray_checkbox.setChecked(settings.get('minimize_to_tray', False))
 
+        # 加载提醒方式设置
+        if 'window_shake' in settings:
+            self.window_shake_checkbox.setChecked(settings['window_shake'])
+        if 'window_flash' in settings:
+            self.window_flash_checkbox.setChecked(settings['window_flash'])
+        if 'taskbar_flash' in settings:
+            self.taskbar_flash_checkbox.setChecked(settings['taskbar_flash'])
+        if 'show_alert_dialog' in settings:
+            self.alert_dialog_checkbox.setChecked(settings['show_alert_dialog'])
+
         # 加载最近计时器
         self.update_recent_list()
     
@@ -728,6 +781,11 @@ class TimerWindow(QMainWindow):
         self.settings_manager.update_setting('always_on_top', self.always_on_top_checkbox.isChecked())
         # 新增：保存最小化到托盘设置
         self.settings_manager.update_setting('minimize_to_tray', self.minimize_to_tray_checkbox.isChecked())
+        # 新增：保存提醒方式设置
+        self.settings_manager.update_setting('window_shake', self.window_shake_checkbox.isChecked())
+        self.settings_manager.update_setting('window_flash', self.window_flash_checkbox.isChecked())
+        self.settings_manager.update_setting('taskbar_flash', self.taskbar_flash_checkbox.isChecked())
+        self.settings_manager.update_setting('show_alert_dialog', self.alert_dialog_checkbox.isChecked())
     
     def start_timer(self):
         """开始计时"""
@@ -933,57 +991,349 @@ class TimerWindow(QMainWindow):
         # 新增：更新任务栏进度
         if self.taskbar_progress:
             self.update_taskbar_progress(progress)
+    
+    # ===== 新增：多种提醒方式 =====
+    
+    def shake_window(self, duration=1000, intensity=5):
+        """窗口抖动效果"""
+        try:
+            original_pos = self.pos()
+            self.shake_animation = QPropertyAnimation(self, b"pos")
+            self.shake_animation.setDuration(duration)
+            self.shake_animation.setLoopCount(2)  # 循环2次
+            
+            # 创建关键帧
+            key_values = [
+                (0, original_pos),
+                (0.1, original_pos + QPoint(intensity, intensity)),
+                (0.2, original_pos + QPoint(-intensity, 0)),
+                (0.3, original_pos + QPoint(0, -intensity)),
+                (0.4, original_pos + QPoint(-intensity, 0)),
+                (0.5, original_pos + QPoint(intensity, intensity)),
+                (0.6, original_pos + QPoint(0, -intensity)),
+                (0.7, original_pos + QPoint(-intensity, intensity)),
+                (0.8, original_pos + QPoint(intensity, 0)),
+                (0.9, original_pos + QPoint(0, intensity)),
+                (1.0, original_pos)
+            ]
+            
+            for key, value in key_values:
+                self.shake_animation.setKeyValueAt(key, value)
+            
+            self.shake_animation.start()
+            print("窗口抖动效果已启动")
+        except Exception as e:
+            print(f"窗口抖动失败: {e}")
+    
+    def flash_window(self, times=5, interval=300):
+        """窗口闪烁效果"""
+        try:
+            if self.flash_timer and self.flash_timer.isActive():
+                self.flash_timer.stop()
+            
+            self.flash_count = 0
+            self.flash_times = times * 2  # 闪烁和恢复各算一次
+            
+            # 保存原始样式
+            self.original_style = self.styleSheet() if hasattr(self, 'original_style') and self.original_style else ""
+            
+            def flash():
+                if self.flash_count < self.flash_times:
+                    if self.flash_count % 2 == 0:
+                        # 红色边框闪烁
+                        self.setStyleSheet("""
+                            QMainWindow {
+                                border: 5px solid #ff4444;
+                            }
+                        """)
+                    else:
+                        # 恢复原始样式
+                        if self.original_style:
+                            self.setStyleSheet(self.original_style)
+                        else:
+                            self.setStyleSheet("")
+                    
+                    self.flash_count += 1
+                else:
+                    if self.flash_timer:
+                        self.flash_timer.stop()
+                    if self.original_style:
+                        self.setStyleSheet(self.original_style)
+            
+            self.flash_timer = QTimer()
+            self.flash_timer.timeout.connect(flash)
+            self.flash_timer.start(interval)
+            print("窗口闪烁效果已启动")
+        except Exception as e:
+            print(f"窗口闪烁失败: {e}")
+    
+    def flash_taskbar(self, times=10, interval=500):
+        """任务栏图标闪烁提醒（仅Windows）"""
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                
+                def flash_icon(flash=True):
+                    try:
+                        if flash:
+                            # 闪烁窗口
+                            ctypes.windll.user32.FlashWindow(int(self.winId()), True)
+                        else:
+                            # 停止闪烁
+                            ctypes.windll.user32.FlashWindow(int(self.winId()), False)
+                    except Exception as e:
+                        print(f"FlashWindow调用失败: {e}")
+                
+                # 停止现有的计时器
+                if self.taskbar_timer and self.taskbar_timer.isActive():
+                    self.taskbar_timer.stop()
+                
+                # 开始闪烁
+                self.flash_count = 0
+                self.taskbar_timer = QTimer()
+                
+                def taskbar_flash():
+                    if self.flash_count < times * 2:
+                        flash_icon(self.flash_count % 2 == 0)
+                        self.flash_count += 1
+                    else:
+                        if self.taskbar_timer:
+                            self.taskbar_timer.stop()
+                        flash_icon(False)
+                
+                self.taskbar_timer.timeout.connect(taskbar_flash)
+                self.taskbar_timer.start(interval)
+                print("任务栏闪烁效果已启动")
+            except Exception as e:
+                print(f"任务栏闪烁失败: {e}")
+    
+    def show_system_notification(self, title="时间到！", message="计时器/倒计时已结束"):
+        """显示系统通知"""
+        try:
+            if hasattr(self, 'tray_icon') and self.tray_icon and QSystemTrayIcon.isSystemTrayAvailable():
+                # 使用系统托盘图标显示通知
+                self.tray_icon.showMessage(
+                    title,
+                    message,
+                    QSystemTrayIcon.Critical,  # 使用严重级别图标
+                    5000  # 显示5秒
+                )
+                print("系统通知已发送")
+            else:
+                # 如果没有托盘图标，则使用QMessageBox
+                QMessageBox.warning(self, title, message)
+        except Exception as e:
+            print(f"显示系统通知失败: {e}")
+    
+    def show_alert_dialog(self):
+        """显示更醒目的提醒对话框"""
+        try:
+            # 创建自定义对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle("⏰ 时间到！")
+            dialog.setWindowFlags(
+                Qt.Dialog | 
+                Qt.WindowStaysOnTopHint | 
+                Qt.CustomizeWindowHint | 
+                Qt.WindowTitleHint
+            )
+            dialog.setModal(True)
+            
+            # 设置大小
+            dialog.setFixedSize(400, 250)
+            
+            # 设置背景色和样式
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #ff4444;
+                    border: 3px solid #ff0000;
+                    border-radius: 10px;
+                }
+                QLabel {
+                    color: white;
+                }
+                QPushButton {
+                    background-color: white;
+                    color: #ff4444;
+                    border: 2px solid white;
+                    border-radius: 5px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #ffeeee;
+                }
+            """)
+            
+            layout = QVBoxLayout(dialog)
+            layout.setSpacing(20)
+            layout.setContentsMargins(30, 30, 30, 30)
+            
+            # 大图标
+            icon_label = QLabel()
+            icon_pixmap = self.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(64, 64)
+            icon_label.setPixmap(icon_pixmap)
+            icon_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(icon_label)
+            
+            # 标题
+            title_label = QLabel("时间到！")
+            title_label.setAlignment(Qt.AlignCenter)
+            title_font = QFont()
+            title_font.setPointSize(24)
+            title_font.setBold(True)
+            title_label.setFont(title_font)
+            layout.addWidget(title_label)
+            
+            # 消息
+            timer_type = "倒计时" if self.current_timer_type == 'countdown' else "计时器"
+            message_label = QLabel(f"{timer_type}已结束")
+            message_label.setAlignment(Qt.AlignCenter)
+            message_font = QFont()
+            message_font.setPointSize(16)
+            message_label.setFont(message_font)
+            layout.addWidget(message_label)
+            
+            # 按钮
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+            button_box.accepted.connect(dialog.accept)
+            button_box.setCenterButtons(True)
+            ok_button = button_box.button(QDialogButtonBox.Ok)
+            ok_button.setText("知道了")
+            ok_button.setMinimumSize(100, 40)
+            
+            layout.addWidget(button_box)
+            
+            # 设置对话框位置（屏幕中央）
+            screen_geometry = QApplication.desktop().screenGeometry()
+            dialog.move(
+                (screen_geometry.width() - dialog.width()) // 2,
+                (screen_geometry.height() - dialog.height()) // 2
+            )
+            
+            # 显示对话框
+            dialog.exec_()
+            print("醒目提醒对话框已显示")
+        except Exception as e:
+            print(f"显示提醒对话框失败: {e}")
+    
+    def test_alarm_effects(self):
+        """测试提醒效果"""
+        try:
+            # 暂时禁用声音，避免测试时发出声音
+            original_mute_state = self.mute_checkbox.isChecked()
+            self.mute_checkbox.setChecked(True)
+            
+            # 测试各种提醒效果
+            self.show_system_notification("测试提醒", "正在测试提醒效果...")
+            
+            if self.window_shake_checkbox.isChecked():
+                self.shake_window(duration=800, intensity=5)
+            
+            if self.window_flash_checkbox.isChecked():
+                self.flash_window(times=3, interval=200)
+            
+            if self.taskbar_flash_checkbox.isChecked() and sys.platform == 'win32':
+                self.flash_taskbar(times=4, interval=300)
+            
+            if self.alert_dialog_checkbox.isChecked():
+                QTimer.singleShot(1000, self.show_alert_dialog)
+            
+            # 恢复原来的静音状态
+            QTimer.singleShot(2000, lambda: self.mute_checkbox.setChecked(original_mute_state))
+            
+            self.status_bar.showMessage('提醒效果测试中...')
+        except Exception as e:
+            print(f"测试提醒效果失败: {e}")
+    
+    def toggle_window_shake(self, state):
+        """切换窗口抖动设置"""
+        self.settings_manager.update_setting('window_shake', bool(state))
+    
+    def toggle_window_flash(self, state):
+        """切换窗口闪烁设置"""
+        self.settings_manager.update_setting('window_flash', bool(state))
+    
+    def toggle_taskbar_flash(self, state):
+        """切换任务栏闪烁设置"""
+        self.settings_manager.update_setting('taskbar_flash', bool(state))
+    
+    def toggle_alert_dialog(self, state):
+        """切换提醒对话框设置"""
+        self.settings_manager.update_setting('show_alert_dialog', bool(state))
             
     def alarm_triggered(self):
         """闹钟触发"""
-        # 显示窗口
-        self.show_window()
+        try:
+            print("闹钟触发，开始执行提醒效果")
+            
+            # 显示窗口到最前面
+            self.show_window()
+            
+            # 播放声音（如果不静音）
+            if not self.mute_checkbox.isChecked():
+                self.play_alarm_sound()
+            
+            # 更新进度条为100%
+            if self.current_timer_type == 'countdown':
+                self.countdown_progress.setValue(100)
+            elif self.current_timer_type == 'timer':
+                self.timer_progress.setValue(100)
+            
+            # ===== 新增多种提醒方式 =====
+            
+            # 1. 窗口抖动（如果启用）
+            if self.window_shake_checkbox.isChecked():
+                self.shake_window(duration=1500, intensity=8)
+            
+            # 2. 窗口闪烁（如果启用）
+            if self.window_flash_checkbox.isChecked():
+                self.flash_window(times=6, interval=250)
+            
+            # 3. 系统通知（总是显示）
+            timer_type = "倒计时" if self.current_timer_type == 'countdown' else "计时器"
+            self.show_system_notification(
+                title="⏰ 时间到！", 
+                message=f"{timer_type}已结束"
+            )
+            
+            # 4. 任务栏闪烁（Windows，如果启用）
+            if (self.taskbar_flash_checkbox.isChecked() and 
+                sys.platform == 'win32'):
+                self.flash_taskbar(times=8, interval=400)
+            
+            # 5. 显示醒目的弹窗（如果启用）
+            if self.alert_dialog_checkbox.isChecked():
+                QTimer.singleShot(500, self.show_alert_dialog)
+            
+            # ===== 原有功能保持 =====
+            
+            # 新增：时间到时显示绿色完成状态
+            if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+                try:
+                    self.update_taskbar_progress(100)
+                    QTimer.singleShot(3000, lambda: self.show_taskbar_progress(False))
+                except Exception as e:
+                    print(f"设置任务栏完成状态失败: {e}")
+            
+            # 重置对应的控件
+            if self.current_timer_type == 'timer':
+                QTimer.singleShot(1000, self.reset_timer)
+            elif self.current_timer_type == 'countdown':
+                QTimer.singleShot(1000, self.reset_countdown)
+            
+            # 更新系统托盘提示
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.setToolTip('多功能计时器')
+            
+            self.status_bar.showMessage('时间到！')
+            print("所有提醒效果已执行完毕")
+            
+        except Exception as e:
+            print(f"闹钟触发过程中出错: {e}")
+            import traceback
+            traceback.print_exc()
         
-        # 播放声音（如果不静音）
-        if not self.mute_checkbox.isChecked():
-            self.play_alarm_sound()
-        
-        # 更新进度条为100%
-        if self.current_timer_type == 'countdown':
-            self.countdown_progress.setValue(100)
-        elif self.current_timer_type == 'timer':
-            self.timer_progress.setValue(100)
-        
-        # 显示提醒对话框
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.setWindowTitle('时间到！')
-        msg_box.setText('时间到了！')
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.setDefaultButton(QMessageBox.Ok)
-        
-        # 使对话框保持在前台
-        msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowStaysOnTopHint)
-        msg_box.exec_()
-        
-        # 新增：时间到时显示绿色完成状态
-        if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
-            try:
-                # 先显示100%完成
-                self.update_taskbar_progress(100)
-                # 设置完成状态为绿色
-                # 注意：QWinTaskbarProgress的完成状态需要特定的样式，这里我们只显示100%
-                QTimer.singleShot(3000, lambda: self.show_taskbar_progress(False))
-            except Exception as e:
-                print(f"设置任务栏完成状态失败: {e}")
-        
-        # 重置对应的控件
-        if self.current_timer_type == 'timer':
-            self.reset_timer()
-        elif self.current_timer_type == 'countdown':
-            self.reset_countdown()
-        
-        # 更新系统托盘提示
-        if hasattr(self, 'tray_icon'):
-            self.tray_icon.setToolTip('多功能计时器')
-        
-        self.status_bar.showMessage('时间到！')
-    
     def play_alarm_sound(self):
         """播放闹钟声音"""
         # 这里可以实现播放自定义声音文件
