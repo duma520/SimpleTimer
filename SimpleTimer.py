@@ -4,6 +4,10 @@ import json
 import threading
 import time
 import datetime
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, message="sipPyTypeDict")
+
 from pathlib import Path
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
@@ -17,7 +21,219 @@ try:
 except ImportError:
     HAS_WIN_EXTRAS = False
     print("警告: PyQt5.QtWinExtras 不可用，Windows任务栏进度条功能将不可用")
-    
+
+from PyQt5.QtGui import QIcon, QColor
+from datetime import datetime
+
+class ProjectInfo:
+    """项目信息元数据（集中管理所有项目相关信息）"""
+    VERSION = "2.9.1"
+    BUILD_DATE = "2025-06-28"
+    from datetime import datetime
+    # BUILD_DATE = datetime.now().strftime("%Y-%m-%d")  # 修改为动态获取当前日期
+    AUTHOR = "杜玛"
+    LICENSE = "MIT"
+    COPYRIGHT = "© 永久 杜玛"
+    URL = "https://github.com/duma520"
+    MAINTAINER_EMAIL = "不提供"
+    NAME = "多功能计时器"
+    DESCRIPTION = """多功能计时器
+主要功能：
+1. 计时器功能：正向计时，无限制计时
+2. 倒计时功能：设置特定时间进行倒计时
+3. 预设功能：常用时间预设，支持自定义预设
+4. 多种提醒方式：窗口抖动、窗口闪烁、任务栏闪烁、系统通知等
+5. 系统托盘支持：最小化到托盘运行
+6. Windows任务栏进度条：显示计时/倒计时进度
+7. 自定义铃声：支持多种音频格式
+8. 状态颜色指示：不同状态（运行/暂停/停止）使用不同颜色显示
+"""
+
+    VERSION_HISTORY = {
+        "1.0": "初始化版本 - 基础计时器和倒计时功能",
+        "1.1": "修改最小化到托盘的默认情况",
+        "1.2": "任务栏进度条问题未解决",
+        "2.0": "解决任务栏进度问题",
+        "2.1": "解决启动时候就托盘的问题",
+        "2.2": "解决90%问题",
+        "2.3": "增加多种提醒方式（窗口抖动、窗口闪烁、任务栏闪烁、醒目对话框）",
+        "2.4": "解决自定义声音问题，支持更多音频格式",
+        "2.5": "解决默认WAV播放问题，优化音频播放器",
+        "2.6": "倒计时标签变色功能 - 不同状态显示不同颜色",
+        "2.7": "计时器时间标签变色功能 - 统一状态颜色指示",
+        "2.8": "修复自定义声音选择问题，优化文件格式验证",
+        "2.9": "完善项目信息元数据，增加详细版本历史",
+        "2.9.1": "增加关于对话框详细信息，优化用户界面和交互体验"
+    }
+
+    HELP_TEXT = """
+基本操作指南：
+
+计时器功能：
+1. 点击"开始计时"按钮开始正向计时
+2. 点击"暂停"按钮暂停计时，再次点击继续
+3. 点击"重置"按钮将计时器归零
+
+倒计时功能：
+1. 通过小时、分钟、秒数设置倒计时时间
+2. 点击"开始倒计时"按钮开始倒计时
+3. 使用快速设置按钮快速设置常用时间
+4. 最近使用的计时器会自动保存方便下次使用
+
+预设功能：
+1. 使用预设的时间快速开始倒计时
+2. 可以添加自定义预设名称和时间
+3. 预设支持2小时和3小时等长时间设置
+
+提醒设置：
+1. 支持多种提醒方式：窗口抖动、窗口闪烁、任务栏闪烁、醒目对话框
+2. 可单独开启或关闭各种提醒方式
+3. 使用"测试提醒效果"按钮预览提醒效果
+
+声音设置：
+1. 支持音量调节和静音功能
+2. 支持自定义铃声（WAV、MP3、OGG、FLAC、AAC、M4A格式）
+3. 使用"测试声音"按钮测试当前铃声
+
+窗口设置：
+1. 支持窗口置顶功能
+2. 支持最小化到系统托盘运行
+3. Windows任务栏显示计时进度条
+
+系统托盘：
+1. 启用"最小化到托盘"后，最小化窗口会隐藏到系统托盘
+2. 双击托盘图标恢复窗口显示
+3. 右键托盘图标可进行相关操作
+
+任务栏进度条（仅Windows）：
+1. 计时器运行时显示不确定模式进度条
+2. 倒计时运行时显示确定模式进度条，显示剩余时间百分比
+3. 暂停时显示黄色暂停状态
+4. 完成时显示100%完成状态
+"""
+
+    @classmethod
+    def get_metadata(cls) -> dict:
+        """获取主要元数据字典"""
+        return {
+            'name': cls.NAME,
+            'version': cls.VERSION,
+            'build_date': cls.BUILD_DATE,
+            'author': cls.AUTHOR,
+            'license': cls.LICENSE,
+            'copyright': cls.COPYRIGHT,
+            'url': cls.URL,
+            'maintainer_email': cls.MAINTAINER_EMAIL
+        }
+
+    @classmethod
+    def get_header(cls) -> str:
+        """生成标准化的项目头信息"""
+        return f"{cls.NAME} v{cls.VERSION} | {cls.LICENSE} License | {cls.URL}"
+
+    @classmethod
+    def get_about_info(cls):
+        """获取ABOUT信息字典"""
+        return {
+            "name": cls.NAME,
+            "version": cls.VERSION,
+            "build_date": cls.BUILD_DATE,
+            "author": cls.AUTHOR,
+            "license": cls.LICENSE,
+            "copyright": cls.COPYRIGHT,
+            "url": cls.URL,
+            "maintainer_email": cls.MAINTAINER_EMAIL,
+            "description": cls.DESCRIPTION,
+            "features": [
+                "计时器功能 - 正向无限计时",
+                "倒计时功能 - 可设置具体时间",
+                "多种提醒方式 - 窗口抖动、闪烁、任务栏闪烁等",
+                "系统托盘支持 - 最小化到托盘运行",
+                "Windows任务栏进度条 - 显示计时进度",
+                "自定义铃声 - 支持多种音频格式",
+                "状态颜色指示 - 运行/暂停/停止不同颜色",
+                "预设功能 - 常用时间预设和自定义预设"
+            ],
+            "system_requirements": [
+                "操作系统: Windows 7/8/10/11, Linux, macOS",
+                "Python: 3.6 或更高版本",
+                "PyQt5: 5.15 或更高版本",
+                "音频支持: 需要系统音频编解码器支持"
+            ],
+            "version_history": cls.VERSION_HISTORY,
+            "help_text": cls.HELP_TEXT
+        }
+
+    @classmethod
+    def show_about_dialog(cls, parent=None):
+        """显示关于对话框"""
+        from PyQt5.QtWidgets import QMessageBox, QTextBrowser
+        from PyQt5.QtCore import Qt
+        
+        about_text = f"""
+{cls.get_header()}
+
+{cls.DESCRIPTION}
+
+版本历史：
+"""
+        for version, desc in cls.VERSION_HISTORY.items():
+            about_text += f"\n• v{version}: {desc}"
+        
+        about_text += f"\n\n主要功能："
+        for i, feature in enumerate(cls.get_about_info()["features"], 1):
+            about_text += f"\n{i}. {feature}"
+        
+        about_text += f"\n\n系统要求："
+        for req in cls.get_about_info()["system_requirements"]:
+            about_text += f"\n• {req}"
+        
+        about_text += f"\n\n{cls.COPYRIGHT}"
+        
+        msg_box = QMessageBox(parent)
+        msg_box.setWindowTitle(f"关于 {cls.NAME}")
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(f"<h2>{cls.NAME} v{cls.VERSION}</h2>")
+        msg_box.setInformativeText(f"""
+<p><b>作者：</b>{cls.AUTHOR}</p>
+<p><b>许可证：</b>{cls.LICENSE}</p>
+<p><b>构建日期：</b>{cls.BUILD_DATE}</p>
+<p><b>项目地址：</b><a href="{cls.URL}">{cls.URL}</a></p>
+""")
+        
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+        text_browser.setHtml(f"<pre>{about_text}</pre>")
+        text_browser.setMinimumSize(600, 400)
+        
+        msg_box.layout().addWidget(text_browser, 1, 0, 1, msg_box.layout().columnCount())
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.exec_()
+
+# 马卡龙色系定义
+class MacaronColors_12:
+    # 粉色系
+    SAKURA_PINK = QColor('#FFB7CE')  # 樱花粉
+    ROSE_PINK = QColor('#FF9AA2')    # 玫瑰粉
+    # 蓝色系
+    SKY_BLUE = QColor('#A2E1F6')     # 天空蓝
+    LILAC_MIST = QColor('#E6E6FA')   # 淡丁香
+    # 绿色系
+    MINT_GREEN = QColor('#B5EAD7')   # 薄荷绿
+    APPLE_GREEN = QColor('#D4F1C7')  # 苹果绿
+    # 黄色/橙色系
+    LEMON_YELLOW = QColor('#FFEAA5') # 柠檬黄
+    BUTTER_CREAM = QColor('#FFF8B8') # 奶油黄
+    PEACH_ORANGE = QColor('#FFDAC1') # 蜜桃橙
+    # 紫色系
+    LAVENDER = QColor('#C7CEEA')     # 薰衣草紫
+    TARO_PURPLE = QColor('#D8BFD8')  # 香芋紫
+    # 中性色
+    CARAMEL_CREAM = QColor('#F0E6DD') # 焦糖奶霜
+
+
+
+
 class TimerThread(QThread):
     """计时器线程"""
     update_signal = pyqtSignal(str, int)  # 更新时间信号
@@ -177,7 +393,23 @@ class TimerWindow(QMainWindow):
         self.alarm_sound = None
         self.current_timer_type = None
         self.current_duration = 0
-        
+
+        # 新增：初始化标记
+        self._is_initializing = False
+
+        # 新增：倒计时状态变量
+        self.countdown_state = 'stopped'  # 'stopped', 'running', 'paused'
+
+        # 新增：倒计时状态变量
+        self.countdown_state = 'stopped'  # 'stopped', 'running', 'paused'
+
+        # 新增：计时器状态变量
+        self.timer_state = 'stopped'  # 'stopped', 'running', 'paused'
+    
+        # 新增：音频播放器
+        self.media_player = None
+        self.init_audio_player()
+                
         # 初始化属性，避免AttributeError
         self.tray_icon = None
         self.taskbar_button = None
@@ -198,7 +430,8 @@ class TimerWindow(QMainWindow):
     
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle('多功能计时器')
+        # self.setWindowTitle('多功能计时器')
+        self.setWindowTitle(f"{ProjectInfo.NAME} {ProjectInfo.VERSION} (Build: {ProjectInfo.BUILD_DATE})")
         self.setMinimumSize(800, 600)
         
         # 设置图标
@@ -276,6 +509,10 @@ class TimerWindow(QMainWindow):
         display_font.setPointSize(48)
         display_font.setBold(True)
         self.timer_display.setFont(display_font)
+        # 修改这里的样式设置，使用动态样式
+        self.timer_display.setObjectName('timerDisplay')  # 添加对象名称以便CSS选择
+        self.update_timer_display_style()  # 调用方法更新样式
+        layout.addWidget(self.timer_display)
         self.timer_display.setStyleSheet("""
             QLabel {
                 color: #2196F3;
@@ -373,6 +610,9 @@ class TimerWindow(QMainWindow):
         display_font.setPointSize(48)
         display_font.setBold(True)
         self.countdown_display.setFont(display_font)
+        # 修改这里的样式设置，使用动态样式
+        self.countdown_display.setObjectName('countdownDisplay')  # 添加对象名称以便CSS选择
+        self.update_countdown_display_style()  # 调用方法更新样式
         self.countdown_display.setStyleSheet("""
             QLabel {
                 color: #FF5722;
@@ -597,6 +837,9 @@ class TimerWindow(QMainWindow):
         
         layout.addStretch()
         self.tab_widget.addTab(settings_tab, "⚙️ 设置")
+
+        # 创建关于标签页
+        self.create_about_tab()
         
     def setup_tray_icon(self):
         """设置系统托盘图标"""
@@ -638,26 +881,34 @@ class TimerWindow(QMainWindow):
     
     def closeEvent(self, event):
         """关闭事件"""
-        # 获取最小化到托盘的设置
-        minimize_to_tray = self.settings_manager.settings.get('minimize_to_tray', False)
-    
-        # 确保托盘图标已初始化
-        if not hasattr(self, 'tray_icon') or not self.tray_icon:
-            self.setup_tray_icon()
-    
-        # 如果启用了最小化到托盘，并且托盘图标可用
-        if minimize_to_tray and hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
-            self.hide()
-            event.ignore()
-            self.tray_icon.showMessage(
-                '多功能计时器',
-                '程序已最小化到系统托盘',
-                QSystemTrayIcon.Information,
-                2000
-            )
-        else:
-            # 否则正常关闭程序
-            self.save_current_settings()
+        try:
+            # 清理资源
+            self.cleanup_resources()
+            
+            # 获取最小化到托盘的设置
+            minimize_to_tray = self.settings_manager.settings.get('minimize_to_tray', False)
+        
+            # 确保托盘图标已初始化
+            if not hasattr(self, 'tray_icon') or not self.tray_icon:
+                self.setup_tray_icon()
+        
+            # 如果启用了最小化到托盘，并且托盘图标可用
+            if minimize_to_tray and hasattr(self, 'tray_icon') and self.tray_icon.isVisible():
+                self.hide()
+                event.ignore()
+                self.tray_icon.showMessage(
+                    '多功能计时器',
+                    '程序已最小化到系统托盘',
+                    QSystemTrayIcon.Information,
+                    2000
+                )
+            else:
+                # 否则正常关闭程序
+                self.save_current_settings()
+                event.accept()
+                
+        except Exception as e:
+            print(f"关闭事件处理失败: {e}")
             event.accept()
     
     def changeEvent(self, event):
@@ -748,14 +999,21 @@ class TimerWindow(QMainWindow):
         self.volume_slider.setValue(settings['volume'])
         self.volume_label.setText(f"{settings['volume']}%")
         
-        # 加载铃声设置
-        if settings['sound_file'] != 'default':
-            self.sound_combo.setCurrentText('自定义铃声...')
+        # 加载铃声设置 - 设置初始化标记
+        self._is_initializing = True
+        try:
+            if settings['sound_file'] != 'default':
+                self.sound_combo.setCurrentText('自定义铃声...')
+                # 这里会自动触发 change_sound 方法
+            else:
+                self.sound_combo.setCurrentText('默认铃声')
+        finally:
+            self._is_initializing = False
         
         # 加载窗口置顶设置
         self.always_on_top_checkbox.setChecked(settings['always_on_top'])
         self.toggle_always_on_top()
-    
+
         # 新增：加载最小化到托盘设置
         self.minimize_to_tray_checkbox.setChecked(settings.get('minimize_to_tray', False))
 
@@ -796,7 +1054,11 @@ class TimerWindow(QMainWindow):
         
         self.current_timer_type = 'timer'
         self.current_duration = 0  # 计时器没有固定时长
-        
+    
+        # 更新计时器状态为运行中
+        self.timer_state = 'running'
+        self.update_timer_display_style()
+    
         self.timer_thread = TimerThread(0, False)
         self.timer_thread.update_signal.connect(self.update_timer_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
@@ -818,7 +1080,11 @@ class TimerWindow(QMainWindow):
                 self.timer_thread.pause()
                 self.pause_timer_btn.setText('继续')
                 self.status_bar.showMessage('计时器已暂停')
-                
+            
+                # 更新计时器状态为暂停
+                self.timer_state = 'paused'
+                self.update_timer_display_style()
+            
                 # 新增：暂停时显示黄色进度条
                 if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
                     try:
@@ -829,7 +1095,11 @@ class TimerWindow(QMainWindow):
                 self.timer_thread.resume()
                 self.pause_timer_btn.setText('暂停')
                 self.status_bar.showMessage('计时器运行中...')
-                
+            
+                # 更新计时器状态为运行中
+                self.timer_state = 'running'
+                self.update_timer_display_style()
+
                 # 新增：恢复时继续显示进度条
                 if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
                     try:
@@ -844,7 +1114,11 @@ class TimerWindow(QMainWindow):
         
         self.timer_display.setText('00:00:00')
         self.timer_progress.setValue(0)
-        
+    
+        # 更新计时器状态为停止
+        self.timer_state = 'stopped'
+        self.update_timer_display_style()
+    
         self.start_timer_btn.setEnabled(True)
         self.pause_timer_btn.setEnabled(False)
         self.pause_timer_btn.setText('暂停')
@@ -872,6 +1146,10 @@ class TimerWindow(QMainWindow):
         
         self.current_timer_type = 'countdown'
         self.current_duration = total_seconds
+    
+        # 更新倒计时状态为运行中
+        self.countdown_state = 'running'
+        self.update_countdown_display_style()
         
         # 添加到最近使用列表
         self.add_to_recent_timers(total_seconds)
@@ -902,7 +1180,11 @@ class TimerWindow(QMainWindow):
                 self.timer_thread.pause()
                 self.pause_countdown_btn.setText('继续')
                 self.status_bar.showMessage('倒计时已暂停')
-                
+            
+                # 更新倒计时状态为暂停
+                self.countdown_state = 'paused'
+                self.update_countdown_display_style()
+            
                 # 新增：暂停时显示黄色进度条
                 if self.taskbar_progress:
                     try:
@@ -913,7 +1195,11 @@ class TimerWindow(QMainWindow):
                 self.timer_thread.resume()
                 self.pause_countdown_btn.setText('暂停')
                 self.status_bar.showMessage('倒计时运行中...')
-                
+            
+                # 更新倒计时状态为运行中
+                self.countdown_state = 'running'
+                self.update_countdown_display_style()
+            
                 # 新增：恢复时继续显示进度条
                 if self.taskbar_progress:
                     try:
@@ -934,7 +1220,11 @@ class TimerWindow(QMainWindow):
         self.countdown_display.setText(self.seconds_to_time_str(total_seconds))
         # 重置进度条为0%
         self.countdown_progress.setValue(0)
-        
+    
+        # 更新倒计时状态为停止
+        self.countdown_state = 'stopped'
+        self.update_countdown_display_style()
+    
         self.start_countdown_btn.setEnabled(True)
         self.pause_countdown_btn.setEnabled(False)
         self.pause_countdown_btn.setText('暂停')
@@ -960,6 +1250,10 @@ class TimerWindow(QMainWindow):
         
         self.countdown_display.setText(self.seconds_to_time_str(seconds))
     
+        # 设置时间时更新样式为停止状态（蓝色）
+        self.countdown_state = 'stopped'
+        self.update_countdown_display_style()
+
     def update_timer_display(self, time_str, progress):
         """更新计时器显示"""
         self.timer_display.setText(time_str)
@@ -1318,8 +1612,14 @@ class TimerWindow(QMainWindow):
             
             # 重置对应的控件
             if self.current_timer_type == 'timer':
+                # 时间到时显示红色（停止状态）
+                self.timer_state = 'stopped'
+                self.update_timer_display_style()
                 QTimer.singleShot(1000, self.reset_timer)
             elif self.current_timer_type == 'countdown':
+                # 时间到时显示红色（停止状态）
+                self.countdown_state = 'stopped'
+                self.update_countdown_display_style()
                 QTimer.singleShot(1000, self.reset_countdown)
             
             # 更新系统托盘提示
@@ -1336,9 +1636,62 @@ class TimerWindow(QMainWindow):
         
     def play_alarm_sound(self):
         """播放闹钟声音"""
-        # 这里可以实现播放自定义声音文件
-        # 目前使用系统提示音
-        QApplication.beep()
+        try:
+            sound_file = self.settings_manager.settings.get('sound_file', 'default')
+            volume = self.settings_manager.settings.get('volume', 100)
+            
+            if sound_file != 'default' and os.path.exists(sound_file):
+                # 检查文件格式
+                supported_formats = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
+                file_ext = os.path.splitext(sound_file)[1].lower()
+                
+                if file_ext in supported_formats:
+                    try:
+                        # 优先使用QMediaPlayer（如果可用）
+                        if self.media_player and hasattr(self.media_player, 'setMedia'):
+                            from PyQt5.QtCore import QUrl
+                            from PyQt5.QtMultimedia import QMediaContent
+                            
+                            # 设置音量
+                            self.media_player.setVolume(volume)
+                            
+                            # 创建媒体内容
+                            media_content = QMediaContent(QUrl.fromLocalFile(sound_file))
+                            self.media_player.setMedia(media_content)
+                            
+                            # 播放
+                            self.media_player.play()
+                            print(f"使用QMediaPlayer播放: {os.path.basename(sound_file)}")
+                            
+                            # 监听播放完成
+                            self.media_player.mediaStatusChanged.connect(
+                                lambda status: print(f"播放状态: {status}")
+                            )
+                            
+                        elif sound_file.lower().endswith('.wav'):
+                            # 回退到QSound（只支持WAV）
+                            sound = QSound(sound_file)
+                            sound.play()
+                            print(f"使用QSound播放WAV文件: {sound_file}")
+                        else:
+                            # 对于其他格式，使用系统默认播放器
+                            print(f"使用系统播放器: {sound_file}")
+                            QApplication.beep()
+                            
+                    except Exception as e:
+                        print(f"播放自定义声音失败: {e}，使用系统提示音")
+                        QApplication.beep()
+                else:
+                    print(f"不支持的文件格式: {sound_file}，使用系统提示音")
+                    QApplication.beep()
+            else:
+                # 使用系统提示音
+                QApplication.beep()
+                print("播放默认系统提示音")
+                
+        except Exception as e:
+            print(f"播放声音失败: {e}")
+            QApplication.beep()
     
     def toggle_mute(self, state):
         """切换静音"""
@@ -1352,21 +1705,110 @@ class TimerWindow(QMainWindow):
     def change_sound(self, sound_name):
         """改变铃声"""
         if sound_name == '自定义铃声...':
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, '选择铃声文件', '', 
-                '声音文件 (*.wav *.mp3 *.ogg);;所有文件 (*.*)'
-            )
-            if file_path:
-                self.settings_manager.update_setting('sound_file', file_path)
+            # 检查是否是程序初始化阶段
+            if hasattr(self, '_is_initializing') and self._is_initializing:
+                # 初始化阶段，直接设置而不弹出对话框
+                sound_file = self.settings_manager.settings.get('sound_file', 'default')
+                if sound_file != 'default' and os.path.exists(sound_file):
+                    # 验证文件格式
+                    supported_extensions = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
+                    file_ext = os.path.splitext(sound_file)[1].lower()
+                    if file_ext not in supported_extensions:
+                        # 不支持的格式，恢复默认
+                        self.settings_manager.update_setting('sound_file', 'default')
+                        self.sound_combo.setCurrentText('默认铃声')
+                        print(f"不支持的音频格式: {file_ext}，已恢复默认铃声")
+                else:
+                    # 文件不存在，恢复默认
+                    self.settings_manager.update_setting('sound_file', 'default')
+                    self.sound_combo.setCurrentText('默认铃声')
+                    print("自定义铃声文件不存在，已恢复默认铃声")
             else:
-                self.sound_combo.setCurrentText('默认铃声')
+                # 用户交互：打开文件选择对话框
+                self._select_custom_sound()
         else:
             self.settings_manager.update_setting('sound_file', 'default')
+
+    def _select_custom_sound(self):
+        """选择自定义铃声文件"""
+        # 定义支持的音频格式
+        supported_formats = [
+            '所有文件 (*.*)',
+            'WAV文件 (*.wav)',
+            'MP3文件 (*.mp3)',
+            'OGG文件 (*.ogg)',
+            'FLAC文件 (*.flac)',
+            'AAC文件 (*.aac *.m4a)'
+        ]
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, '选择铃声文件', '',
+            ';;'.join(supported_formats)
+        )
+        
+        if file_path:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                QMessageBox.warning(self, '错误', '文件不存在！')
+                self.sound_combo.setCurrentText('默认铃声')
+                return
+                
+            # 检查文件大小（限制在10MB以内）
+            file_size = os.path.getsize(file_path)
+            if file_size > 10 * 1024 * 1024:  # 10MB
+                QMessageBox.warning(
+                    self, '文件过大',
+                    '音频文件过大（超过10MB），请选择较小的文件。'
+                )
+                self.sound_combo.setCurrentText('默认铃声')
+                return
+            
+            # 检查文件格式
+            supported_extensions = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext in supported_extensions:
+                self.settings_manager.update_setting('sound_file', file_path)
+                self.status_bar.showMessage(f'已选择自定义铃声: {os.path.basename(file_path)}')
+                
+                # 测试播放
+                QTimer.singleShot(500, self.test_sound)
+            else:
+                QMessageBox.warning(
+                    self, '不支持的格式',
+                    f'不支持的文件格式: {file_ext}\n'
+                    f'支持的格式: {", ".join(supported_extensions)}'
+                )
+                self.sound_combo.setCurrentText('默认铃声')
+        else:
+            self.sound_combo.setCurrentText('默认铃声')
     
     def test_sound(self):
         """测试声音"""
-        if not self.mute_checkbox.isChecked():
+        try:
+            # 临时关闭静音，播放测试声音
+            original_mute_state = self.mute_checkbox.isChecked()
+            
+            # 如果当前是静音状态，临时取消静音
+            if original_mute_state:
+                self.mute_checkbox.setChecked(False)
+            
+            # 播放声音（添加超时保护）
             self.play_alarm_sound()
+            
+            # 设置超时恢复
+            def restore_mute_state():
+                if original_mute_state:
+                    self.mute_checkbox.setChecked(original_mute_state)
+            
+            # 3秒后恢复静音状态
+            QTimer.singleShot(3000, restore_mute_state)
+            
+            self.status_bar.showMessage('正在测试声音...')
+            
+        except Exception as e:
+            print(f"测试声音失败: {e}")
+            self.status_bar.showMessage('测试声音失败')
     
     def toggle_always_on_top(self):
         """切换窗口置顶"""
@@ -1649,7 +2091,336 @@ class TimerWindow(QMainWindow):
                 
             except Exception as e:
                 print(f"测试任务栏进度条失败: {e}")
+
+    def init_audio_player(self):
+        """初始化音频播放器"""
+        try:
+            # 尝试使用QMediaPlayer（支持更多格式）
+            from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+            from PyQt5.QtCore import QUrl
+            
+            self.media_player = QMediaPlayer()
+            self.media_player.setVolume(100)
+            print("QMediaPlayer初始化成功，支持更多音频格式")
+        except ImportError as e:
+            print(f"QMediaPlayer不可用: {e}")
+            self.media_player = None
+
+    def handle_audio_error(self, error):
+        """处理音频播放错误"""
+        error_messages = {
+            0: "没有错误",
+            1: "资源错误",
+            2: "格式错误",
+            3: "网络错误",
+            4: "访问被拒绝",
+            5: "服务缺失"
+        }
+        
+        error_msg = error_messages.get(error, f"未知错误: {error}")
+        print(f"音频播放错误: {error_msg}")
+        
+        # 回退到系统提示音
+        QApplication.beep()
+
+    def cleanup_resources(self):
+        """清理资源"""
+        try:
+            # 停止计时器线程
+            if self.timer_thread and self.timer_thread.isRunning():
+                self.timer_thread.stop()
+                self.timer_thread.wait(2000)  # 等待2秒
+            
+            # 停止音频播放
+            if self.media_player:
+                self.media_player.stop()
                 
+            # 停止所有动画
+            if self.shake_animation:
+                self.shake_animation.stop()
+                
+            if self.flash_timer and self.flash_timer.isActive():
+                self.flash_timer.stop()
+                
+            if self.taskbar_timer and self.taskbar_timer.isActive():
+                self.taskbar_timer.stop()
+                
+        except Exception as e:
+            print(f"清理资源时出错: {e}")
+
+    def update_countdown_display_style(self):
+        """更新倒计时显示的样式"""
+        if self.countdown_state == 'stopped':
+            # 未开始：蓝色（计时器一样的蓝色）
+            style = """
+                QLabel#countdownDisplay {
+                    color: #2196F3;
+                    background-color: #f8f9fa;
+                    border: 2px solid #2196F3;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        elif self.countdown_state == 'running':
+            # 运行中：绿色
+            style = """
+                QLabel#countdownDisplay {
+                    color: #4CAF50;
+                    background-color: #f1f8e9;
+                    border: 2px solid #4CAF50;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        elif self.countdown_state == 'paused':
+            # 暂停：黄色
+            style = """
+                QLabel#countdownDisplay {
+                    color: #FF9800;
+                    background-color: #fff8e1;
+                    border: 2px solid #FF9800;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        else:
+            # 默认：红色（停止状态）
+            style = """
+                QLabel#countdownDisplay {
+                    color: #FF5722;
+                    background-color: #fff3e0;
+                    border: 2px solid #FF5722;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        
+        self.countdown_display.setStyleSheet(style)
+
+    def update_timer_display_style(self):
+        """更新计时器显示的样式"""
+        if self.timer_state == 'stopped':
+            # 未开始：蓝色
+            style = """
+                QLabel#timerDisplay {
+                    color: #2196F3;
+                    background-color: #f8f9fa;
+                    border: 2px solid #2196F3;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        elif self.timer_state == 'running':
+            # 运行中：绿色
+            style = """
+                QLabel#timerDisplay {
+                    color: #4CAF50;
+                    background-color: #f1f8e9;
+                    border: 2px solid #4CAF50;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        elif self.timer_state == 'paused':
+            # 暂停：黄色
+            style = """
+                QLabel#timerDisplay {
+                    color: #FF9800;
+                    background-color: #fff8e1;
+                    border: 2px solid #FF9800;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        else:
+            # 默认：蓝色
+            style = """
+                QLabel#timerDisplay {
+                    color: #2196F3;
+                    background-color: #f8f9fa;
+                    border: 2px solid #2196F3;
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 10px;
+                }
+            """
+        
+        self.timer_display.setStyleSheet(style)
+
+    def create_about_tab(self):
+        """创建关于标签页"""
+        about_tab = QWidget()
+        layout = QVBoxLayout(about_tab)
+        layout.setSpacing(15)
+        
+        # 项目图标和标题
+        header_layout = QHBoxLayout()
+        
+        # 图标
+        if os.path.exists('icon.ico'):
+            icon_label = QLabel()
+            icon_pixmap = QIcon('icon.ico').pixmap(64, 64)
+            icon_label.setPixmap(icon_pixmap)
+            header_layout.addWidget(icon_label)
+        else:
+            # 使用默认图标
+            icon_label = QLabel()
+            icon_pixmap = self.style().standardIcon(QStyle.SP_ComputerIcon).pixmap(64, 64)
+            icon_label.setPixmap(icon_pixmap)
+            header_layout.addWidget(icon_label)
+        
+        # 标题和版本
+        title_layout = QVBoxLayout()
+        
+        title_label = QLabel(f"<h2>{ProjectInfo.NAME}</h2>")
+        title_label.setTextFormat(Qt.RichText)
+        title_layout.addWidget(title_label)
+        
+        version_label = QLabel(f"<b>版本:</b> {ProjectInfo.VERSION}")
+        version_label.setTextFormat(Qt.RichText)
+        title_layout.addWidget(version_label)
+        
+        build_label = QLabel(f"<b>构建日期:</b> {ProjectInfo.BUILD_DATE}")
+        build_label.setTextFormat(Qt.RichText)
+        title_layout.addWidget(build_label)
+        
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+        
+        # 分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+        
+        # 作者信息
+        author_group = QGroupBox("作者信息")
+        author_layout = QVBoxLayout()
+        
+        author_info = QTextBrowser()
+        author_info.setMaximumHeight(100)
+        author_info.setHtml(f"""
+        <p><b>作者:</b> {ProjectInfo.AUTHOR}</p>
+        <p><b>许可证:</b> {ProjectInfo.LICENSE}</p>
+        <p><b>版权所有:</b> {ProjectInfo.COPYRIGHT}</p>
+        <p><b>项目地址:</b> <a href="{ProjectInfo.URL}">{ProjectInfo.URL}</a></p>
+        <p><b>维护者邮箱:</b> {ProjectInfo.MAINTAINER_EMAIL}</p>
+        """)
+        author_info.setOpenExternalLinks(True)
+        author_info.setReadOnly(True)
+        author_layout.addWidget(author_info)
+        
+        author_group.setLayout(author_layout)
+        layout.addWidget(author_group)
+        
+        # 版本历史
+        history_group = QGroupBox("版本历史")
+        history_layout = QVBoxLayout()
+        
+        history_text = QTextBrowser()
+        history_text.setMaximumHeight(200)
+        history_html = "<ul>"
+        for version, desc in sorted(ProjectInfo.VERSION_HISTORY.items(), key=lambda x: [int(i) for i in x[0].split('.')]):
+            history_html += f"<li><b>v{version}:</b> {desc}</li>"
+        history_html += "</ul>"
+        history_text.setHtml(history_html)
+        history_text.setReadOnly(True)
+        history_layout.addWidget(history_text)
+        
+        history_group.setLayout(history_layout)
+        layout.addWidget(history_group)
+        
+        # 主要功能
+        features_group = QGroupBox("主要功能")
+        features_layout = QVBoxLayout()
+        
+        features_text = QTextBrowser()
+        features_text.setMaximumHeight(150)
+        features_html = "<ul>"
+        for i, feature in enumerate(ProjectInfo.get_about_info()["features"], 1):
+            features_html += f"<li>{feature}</li>"
+        features_html += "</ul>"
+        features_text.setHtml(features_html)
+        features_text.setReadOnly(True)
+        features_layout.addWidget(features_text)
+        
+        features_group.setLayout(features_layout)
+        layout.addWidget(features_group)
+        
+        # 系统要求
+        requirements_group = QGroupBox("系统要求")
+        requirements_layout = QVBoxLayout()
+        
+        requirements_text = QTextBrowser()
+        requirements_text.setMaximumHeight(100)
+        requirements_html = "<ul>"
+        for req in ProjectInfo.get_about_info()["system_requirements"]:
+            requirements_html += f"<li>{req}</li>"
+        requirements_html += "</ul>"
+        requirements_text.setHtml(requirements_html)
+        requirements_text.setReadOnly(True)
+        requirements_layout.addWidget(requirements_text)
+        
+        requirements_group.setLayout(requirements_layout)
+        layout.addWidget(requirements_group)
+        
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        
+        # 查看详细帮助按钮
+        help_btn = QPushButton("📖 查看详细帮助")
+        help_btn.clicked.connect(self.show_help_dialog)
+        help_btn.setMinimumHeight(40)
+        button_layout.addWidget(help_btn)
+        
+        # 详细关于信息按钮
+        about_detail_btn = QPushButton("ℹ️ 详细关于信息")
+        about_detail_btn.clicked.connect(self.show_about_detail_dialog)
+        about_detail_btn.setMinimumHeight(40)
+        button_layout.addWidget(about_detail_btn)
+        
+        layout.addLayout(button_layout)
+        
+        layout.addStretch()
+        self.tab_widget.addTab(about_tab, "ℹ️ 关于")
+        
+    def show_help_dialog(self):
+        """显示详细帮助对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{ProjectInfo.NAME} - 帮助")
+        dialog.setMinimumSize(700, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 使用文本浏览器显示帮助内容
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+        text_browser.setHtml(f"""
+        <h1>{ProjectInfo.NAME} 使用帮助</h1>
+        <pre>{ProjectInfo.HELP_TEXT}</pre>
+        """)
+        
+        layout.addWidget(text_browser)
+        
+        # 关闭按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        dialog.exec_()
+
+    def show_about_detail_dialog(self):
+        """显示详细的关于对话框"""
+        ProjectInfo.show_about_dialog(self)
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName('多功能计时器')
