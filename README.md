@@ -1,4 +1,4 @@
-# 软件截图 v2.9.1
+# 软件截图 v2.09.1
 
 <img width="806" height="753" alt="image" src="https://github.com/user-attachments/assets/c861b833-a3c1-4d84-b820-1bd91382b687" />
 
@@ -19,6 +19,13 @@
 <img width="800" height="720" alt="image" src="https://github.com/user-attachments/assets/39fa7a4d-35b4-47d5-87cf-1ebee0ed5bb9" />
 
 <img width="800" height="720" alt="image" src="https://github.com/user-attachments/assets/75027ff0-c42e-4890-92c5-a9483f008d32" />
+
+# 软件截图 v2.10.0 增加时间显示窗口，可以缩放大小或者全屏或者最大化，右键菜单有设置选项
+
+<img width="2478" height="851" alt="image" src="https://github.com/user-attachments/assets/edbca5b5-1ab4-4b41-960f-d0ee8e6f9c31" />
+
+<img width="2798" height="1042" alt="image" src="https://github.com/user-attachments/assets/b5599aaf-6106-4279-985e-10c4e94a5508" />
+
 
 # 《多功能计时器》全能说明书
 **——从零基础到高级应用完全指南**
