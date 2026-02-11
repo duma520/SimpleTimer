@@ -26,6 +26,11 @@
 
 <img width="2798" height="1042" alt="image" src="https://github.com/user-attachments/assets/b5599aaf-6106-4279-985e-10c4e94a5508" />
 
+# 软件截图 v2.12.0 增加NTP 时间服务器校对
+
+<img width="800" height="903" alt="image" src="https://github.com/user-attachments/assets/cc150f58-0157-48e6-be90-61e3a1efe44c" />
+
+
 
 # 《多功能计时器》全能说明书
 **——从零基础到高级应用完全指南**
