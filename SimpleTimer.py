@@ -5,6 +5,7 @@ import threading
 import time
 import datetime
 import warnings
+import math
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, message="sipPyTypeDict")
 
@@ -27,8 +28,8 @@ from datetime import datetime
 
 class ProjectInfo:
     """项目信息元数据（集中管理所有项目相关信息）"""
-    VERSION = "2.9.1"
-    BUILD_DATE = "2025-06-28"
+    VERSION = "2.11.0"
+    BUILD_DATE = "2026-06-28"
     from datetime import datetime
     # BUILD_DATE = datetime.now().strftime("%Y-%m-%d")  # 修改为动态获取当前日期
     AUTHOR = "杜玛"
@@ -47,6 +48,7 @@ class ProjectInfo:
 6. Windows任务栏进度条：显示计时/倒计时进度
 7. 自定义铃声：支持多种音频格式
 8. 状态颜色指示：不同状态（运行/暂停/停止）使用不同颜色显示
+9. 纯时间显示窗口：点击时间标签弹出全屏时间显示窗口，带防烧屏保护
 """
 
     VERSION_HISTORY = {
@@ -63,7 +65,10 @@ class ProjectInfo:
         "2.7": "计时器时间标签变色功能 - 统一状态颜色指示",
         "2.8": "修复自定义声音选择问题，优化文件格式验证",
         "2.9": "完善项目信息元数据，增加详细版本历史",
-        "2.9.1": "增加关于对话框详细信息，优化用户界面和交互体验"
+        "2.9.1": "增加关于对话框详细信息，优化用户界面和交互体验",
+        "2.10.0": "增加纯时间显示窗口功能，带防烧屏保护和自适应缩放",
+        "2.10.1": "优化纯时间显示窗口的防烧屏保护功能，增加更多自定义选项",
+        "2.11.0": "优化纯时间显示窗口的字体自适应缩放，提升用户体验"
     }
 
     HELP_TEXT = """
@@ -88,7 +93,7 @@ class ProjectInfo:
 提醒设置：
 1. 支持多种提醒方式：窗口抖动、窗口闪烁、任务栏闪烁、醒目对话框
 2. 可单独开启或关闭各种提醒方式
-3. 使用"测试提醒效果"按钮预览提醒效果
+3.使用"测试提醒效果"按钮预览提醒效果
 
 声音设置：
 1. 支持音量调节和静音功能
@@ -99,6 +104,14 @@ class ProjectInfo:
 1. 支持窗口置顶功能
 2. 支持最小化到系统托盘运行
 3. Windows任务栏显示计时进度条
+
+纯时间显示窗口：
+1. 点击计时器或倒计时的显示时间标签可弹出纯时间显示窗口
+2. 窗口字体大小随窗口尺寸自动缩放
+3. 支持拖拽到其他屏幕显示
+4. 支持最大化、全屏显示
+5. 内置防烧屏保护功能（像素移动、亮度调节、屏幕保护）
+6. 右键菜单提供各种控制选项
 
 系统托盘：
 1. 启用"最小化到托盘"后，最小化窗口会隐藏到系统托盘
@@ -152,7 +165,8 @@ class ProjectInfo:
                 "Windows任务栏进度条 - 显示计时进度",
                 "自定义铃声 - 支持多种音频格式",
                 "状态颜色指示 - 运行/暂停/停止不同颜色",
-                "预设功能 - 常用时间预设和自定义预设"
+                "预设功能 - 常用时间预设和自定义预设",
+                "纯时间显示窗口 - 全屏时间显示，带防烧屏保护"
             ],
             "system_requirements": [
                 "操作系统: Windows 7/8/10/11, Linux, macOS",
@@ -209,6 +223,548 @@ class ProjectInfo:
         msg_box.layout().addWidget(text_browser, 1, 0, 1, msg_box.layout().columnCount())
         msg_box.setStandardButtons(QMessageBox.Ok)
         msg_box.exec_()
+
+# 新增：纯时间显示窗口类
+class TimeDisplayWindow(QMainWindow):
+    """纯时间显示窗口，带防烧屏保护和自适应缩放"""
+    
+    def __init__(self, parent=None, timer_type='timer', initial_time='00:00:00'):
+        super().__init__(parent)
+        self.parent_timer = parent
+        self.timer_type = timer_type  # 'timer' 或 'countdown'
+        self.current_time = initial_time
+        
+        # 防烧屏相关设置
+        self.burn_in_protection_enabled = True
+        self.pixel_shift_interval = 300  # 像素移动间隔（秒）
+        self.pixel_shift_distance = 2    # 像素移动距离（像素）
+        self.brightness_reduction = 0.85 # 亮度减少比例
+        self.screensaver_timeout = 600   # 屏幕保护启动时间（秒）
+        
+        # 状态变量
+        self.last_pixel_shift_time = time.time()
+        self.last_activity_time = time.time()
+        self.pixel_shift_x = 0
+        self.pixel_shift_y = 0
+        self.is_screensaver_active = False
+        self.is_fullscreen = False
+        self.original_brightness = 1.0
+        
+        # 屏幕保护定时器
+        self.screensaver_timer = QTimer(self)
+        self.screensaver_timer.timeout.connect(self.check_screensaver)
+        self.screensaver_timer.start(1000)  # 每秒检查一次
+        
+        # 像素移动定时器
+        self.pixel_shift_timer = QTimer(self)
+        self.pixel_shift_timer.timeout.connect(self.apply_pixel_shift)
+        if self.burn_in_protection_enabled:
+            self.pixel_shift_timer.start(self.pixel_shift_interval * 1000)
+        
+        # 初始化UI
+        self.init_ui()
+        
+    def init_ui(self):
+        """初始化界面"""
+        self.setWindowTitle(f"纯时间显示 - {self.timer_type}")
+
+        # 选项1：完整的窗口控制按钮
+        self.setWindowFlags(
+            Qt.Window |
+            Qt.WindowStaysOnTopHint |
+            Qt.WindowSystemMenuHint |      # 系统菜单
+            Qt.WindowMinimizeButtonHint |  # 最小化按钮
+            Qt.WindowMaximizeButtonHint |  # 最大化按钮
+            Qt.WindowCloseButtonHint       # 关闭按钮
+        )
+        
+        # 设置背景色为黑色（更适合长时间显示）
+        self.setStyleSheet("background-color: black;")
+        
+        # 中央部件
+        central_widget = QWidget()
+        central_widget.setObjectName("centralWidget")
+        central_widget.setStyleSheet("background-color: black;")
+        self.setCentralWidget(central_widget)
+        
+        # 主布局
+        main_layout = QVBoxLayout(central_widget)
+    
+        # 修改1：设置为简洁模式（更小的边距）
+        main_layout.setContentsMargins(5, 5, 5, 5)  # 从20改为5
+        main_layout.setSpacing(0)
+        
+        # 时间显示标签
+        self.time_label = QLabel(self.current_time)
+        self.time_label.setAlignment(Qt.AlignCenter)
+        self.time_label.setObjectName("timeLabel")
+        
+        # 初始字体大小设置为较小值，后续会根据窗口大小自动调整
+        self.font_size = 50  # 从100改为50，让resizeEvent来处理
+        font = QFont("Arial", self.font_size, QFont.Bold)
+        self.time_label.setFont(font)
+        
+        # 设置文本颜色（根据计时器类型）
+        if self.timer_type == 'timer':
+            self.time_label.setStyleSheet("color: #2196F3;")
+        else:
+            self.time_label.setStyleSheet("color: #FF5722;")
+        
+        main_layout.addWidget(self.time_label, 1)  # 添加拉伸因子为1
+        
+        # 修改2：默认隐藏状态标签（简洁模式）
+        self.status_label = QLabel("点击右键显示菜单 | 防烧屏保护已启用")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("color: #888888; font-size: 12px; margin-top: 10px;")
+        self.status_label.hide()  # 默认隐藏状态标签
+        main_layout.addWidget(self.status_label)
+        
+        # 设置初始窗口大小
+        self.resize(800, 400)
+        
+        # 启用鼠标跟踪
+        self.setMouseTracking(True)
+        central_widget.setMouseTracking(True)
+        self.time_label.setMouseTracking(True)
+        
+        # 设置上下文菜单策略
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+
+        # 立即调整字体大小以适应窗口
+        QTimer.singleShot(100, self.adjust_font_size)
+
+    def update_time(self, time_str, progress=0):
+        """更新时间显示"""
+        self.current_time = time_str
+        self.time_label.setText(time_str)
+        
+        # 更新时间后重新调整字体大小
+        self.adjust_font_size()
+        
+        # 更新最后活动时间
+        self.last_activity_time = time.time()
+        
+    def update_time_style(self, state):
+        """根据状态更新时间显示样式"""
+        color_map = {
+            'stopped': '#2196F3',
+            'running': '#4CAF50',
+            'paused': '#FF9800'
+        }
+        
+        color = color_map.get(state, '#2196F3')
+        self.time_label.setStyleSheet(f"color: {color};")
+        
+    def resizeEvent(self, event):
+        """窗口大小改变事件 - 自适应字体大小"""
+        super().resizeEvent(event)
+        self.adjust_font_size()
+        
+    def adjust_font_size(self):
+        """根据窗口大小调整字体大小，让字体填满窗口"""
+        # 获取窗口和标签的尺寸
+        window_width = self.width()
+        window_height = self.height()
+        
+        # 计算基于文本长度和窗口尺寸的字体大小
+        text = self.time_label.text()
+        text_length = len(text.replace(':', ''))
+        
+        # 计算方法1：基于宽度（主要限制因素）
+        # 假设每个字符的平均宽度是字体大小的一半
+        # 我们想要文本占据窗口宽度的80%
+        target_width = window_width * 0.8
+        font_size_by_width = int(target_width / (text_length * 0.6))
+        
+        # 计算方法2：基于高度
+        # 我们想要文本占据窗口高度的70%
+        target_height = window_height * 0.7
+        font_size_by_height = int(target_height * 0.9)  # 字体大小约为高度的0.9倍
+        
+        # 取两个计算结果的较小值，确保文本不会超出窗口
+        new_font_size = min(font_size_by_width, font_size_by_height)
+        
+        # 设置最小和最大字体大小限制
+        min_font_size = 20
+        max_font_size = 500  # 增加最大字体大小限制
+        
+        if new_font_size < min_font_size:
+            new_font_size = min_font_size
+        elif new_font_size > max_font_size:
+            new_font_size = max_font_size
+        
+        # 如果字体大小有显著变化才更新
+        if abs(new_font_size - self.font_size) > 5 or new_font_size != self.font_size:
+            self.font_size = new_font_size
+            
+            # 应用新字体
+            font = QFont("Arial", self.font_size, QFont.Bold)
+            
+            # 设置字体平滑和抗锯齿
+            font.setHintingPreference(QFont.PreferFullHinting)
+            
+            # 确保字体不会太大导致布局问题
+            font_metrics = QFontMetrics(font)
+            text_width = font_metrics.width(text)
+            text_height = font_metrics.height()
+            
+            # 如果文本太大，逐步减小字体直到合适
+            while (text_width > window_width * 0.9 or text_height > window_height * 0.9) and self.font_size > min_font_size:
+                self.font_size -= 1
+                font = QFont("Arial", self.font_size, QFont.Bold)
+                font_metrics = QFontMetrics(font)
+                text_width = font_metrics.width(text)
+                text_height = font_metrics.height()
+            
+            self.time_label.setFont(font)
+            
+            # 强制更新布局
+            self.time_label.adjustSize()
+            self.update()
+        
+    def show_context_menu(self, position):
+        """显示上下文菜单"""
+        menu = QMenu(self)
+        
+        # 设置菜单样式 - 使用系统默认样式或自定义浅色样式
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+            QMenu::item:disabled {
+                color: gray;
+            }
+        """)
+        
+        # 显示模式选项
+        mode_menu = QMenu("显示模式")
+        mode_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+        """)
+        
+        normal_action = QAction("正常模式", self)
+        normal_action.triggered.connect(lambda: self.set_display_mode('normal'))
+        mode_menu.addAction(normal_action)
+        
+        minimal_action = QAction("简洁模式", self)
+        minimal_action.triggered.connect(lambda: self.set_display_mode('minimal'))
+        mode_menu.addAction(minimal_action)
+        
+        menu.addMenu(mode_menu)
+        
+        menu.addSeparator()
+        
+        # 窗口控制选项
+        if not self.is_fullscreen:
+            fullscreen_action = QAction("全屏显示", self)
+            fullscreen_action.triggered.connect(self.toggle_fullscreen)
+            menu.addAction(fullscreen_action)
+        else:
+            exit_fullscreen_action = QAction("退出全屏", self)
+            exit_fullscreen_action.triggered.connect(self.toggle_fullscreen)
+            menu.addAction(exit_fullscreen_action)
+        
+        maximize_action = QAction("最大化", self)
+        maximize_action.triggered.connect(self.toggle_maximize)
+        menu.addAction(maximize_action)
+        
+        menu.addSeparator()
+        
+        # 防烧屏设置
+        burnin_menu = QMenu("防烧屏设置")
+        burnin_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+        """)
+        
+        burnin_toggle = QAction("启用防烧屏保护", self)
+        burnin_toggle.setCheckable(True)
+        burnin_toggle.setChecked(self.burn_in_protection_enabled)
+        burnin_toggle.triggered.connect(self.toggle_burnin_protection)
+        burnin_menu.addAction(burnin_toggle)
+        
+        burnin_menu.addSeparator()
+        
+        shift_fast = QAction("快速像素移动 (60秒)", self)
+        shift_fast.triggered.connect(lambda: self.set_pixel_shift_interval(60))
+        burnin_menu.addAction(shift_fast)
+        
+        shift_medium = QAction("中速像素移动 (5分钟)", self)
+        shift_medium.triggered.connect(lambda: self.set_pixel_shift_interval(300))
+        burnin_menu.addAction(shift_medium)
+        
+        shift_slow = QAction("慢速像素移动 (15分钟)", self)
+        shift_slow.triggered.connect(lambda: self.set_pixel_shift_interval(900))
+        burnin_menu.addAction(shift_slow)
+        
+        menu.addMenu(burnin_menu)
+        
+        menu.addSeparator()
+        
+        # 颜色主题
+        color_menu = QMenu("颜色主题")
+        color_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+        """)
+        
+        blue_action = QAction("蓝色主题", self)
+        blue_action.triggered.connect(lambda: self.set_color_theme('blue'))
+        color_menu.addAction(blue_action)
+        
+        green_action = QAction("绿色主题", self)
+        green_action.triggered.connect(lambda: self.set_color_theme('green'))
+        color_menu.addAction(green_action)
+        
+        red_action = QAction("红色主题", self)
+        red_action.triggered.connect(lambda: self.set_color_theme('red'))
+        color_menu.addAction(red_action)
+        
+        white_action = QAction("白色主题", self)
+        white_action.triggered.connect(lambda: self.set_color_theme('white'))
+        color_menu.addAction(white_action)
+        
+        custom_action = QAction("自定义颜色...", self)
+        custom_action.triggered.connect(self.choose_custom_color)
+        color_menu.addAction(custom_action)
+        
+        menu.addMenu(color_menu)
+        
+        menu.addSeparator()
+        
+        # 关闭窗口
+        close_action = QAction("关闭窗口", self)
+        close_action.triggered.connect(self.close)
+        menu.addAction(close_action)
+        
+        # 显示菜单
+        menu.exec_(self.mapToGlobal(position))
+        
+    def set_display_mode(self, mode):
+        """设置显示模式"""
+        if mode == 'minimal':
+            # 简洁模式：隐藏状态标签，调整边距
+            self.status_label.hide()
+            self.centralWidget().layout().setContentsMargins(5, 5, 5, 5)
+        else:
+            # 正常模式：显示状态标签，恢复边距
+            self.status_label.show()
+            self.centralWidget().layout().setContentsMargins(20, 20, 20, 20)
+        
+        self.adjust_font_size()
+        
+    def toggle_fullscreen(self):
+        """切换全屏模式"""
+        if not self.is_fullscreen:
+            self.showFullScreen()
+            self.is_fullscreen = True
+            self.status_label.setText("全屏模式 | 按ESC退出全屏")
+        else:
+            self.showNormal()
+            self.is_fullscreen = False
+            self.status_label.setText("点击右键显示菜单 | 防烧屏保护已启用")
+        
+    def toggle_maximize(self):
+        """切换最大化"""
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+            
+    def toggle_burnin_protection(self, enabled):
+        """切换防烧屏保护"""
+        self.burn_in_protection_enabled = enabled
+        
+        if enabled:
+            self.pixel_shift_timer.start(self.pixel_shift_interval * 1000)
+            self.status_label.setText("点击右键显示菜单 | 防烧屏保护已启用")
+        else:
+            self.pixel_shift_timer.stop()
+            # 重置像素偏移
+            self.pixel_shift_x = 0
+            self.pixel_shift_y = 0
+            self.time_label.setGeometry(self.time_label.x() - self.pixel_shift_x, 
+                                      self.time_label.y() - self.pixel_shift_y,
+                                      self.time_label.width(), 
+                                      self.time_label.height())
+            self.status_label.setText("点击右键显示菜单 | 防烧屏保护已禁用")
+            
+    def set_pixel_shift_interval(self, interval):
+        """设置像素移动间隔"""
+        self.pixel_shift_interval = interval
+        
+        if self.burn_in_protection_enabled:
+            self.pixel_shift_timer.stop()
+            self.pixel_shift_timer.start(interval * 1000)
+            
+        self.status_label.setText(f"点击右键显示菜单 | 防烧屏保护: {interval}秒间隔")
+        
+    def set_color_theme(self, theme):
+        """设置颜色主题"""
+        color_map = {
+            'blue': '#2196F3',
+            'green': '#4CAF50',
+            'red': '#F44336',
+            'white': '#FFFFFF'
+        }
+        
+        color = color_map.get(theme, '#2196F3')
+        self.time_label.setStyleSheet(f"color: {color};")
+        
+    def choose_custom_color(self):
+        """选择自定义颜色"""
+        color = QColorDialog.getColor()
+        if color.isValid():
+            self.time_label.setStyleSheet(f"color: {color.name()};")
+            
+    def apply_pixel_shift(self):
+        """应用像素移动防烧屏保护"""
+        if not self.burn_in_protection_enabled or self.is_screensaver_active:
+            return
+            
+        # 在有限的范围内移动像素
+        self.pixel_shift_x = (self.pixel_shift_x + self.pixel_shift_distance) % (self.pixel_shift_distance * 4)
+        self.pixel_shift_y = (self.pixel_shift_y + self.pixel_shift_distance) % (self.pixel_shift_distance * 4)
+        
+        # 轻微移动标签位置
+        self.time_label.move(20 + self.pixel_shift_x, 20 + self.pixel_shift_y)
+        
+        # 记录移动时间
+        self.last_pixel_shift_time = time.time()
+        
+    def check_screensaver(self):
+        """检查是否需要启动屏幕保护"""
+        if not self.burn_in_protection_enabled:
+            return
+            
+        current_time = time.time()
+        idle_time = current_time - self.last_activity_time
+        
+        # 如果空闲时间超过阈值，启动屏幕保护
+        if idle_time > self.screensaver_timeout and not self.is_screensaver_active:
+            self.activate_screensaver()
+        elif idle_time <= self.screensaver_timeout and self.is_screensaver_active:
+            self.deactivate_screensaver()
+            
+    def activate_screensaver(self):
+        """激活屏幕保护"""
+        self.is_screensaver_active = True
+        
+        # 保存原始亮度
+        self.original_brightness = 1.0
+        
+        # 降低亮度
+        self.apply_brightness_reduction()
+        
+        # 停止像素移动
+        self.pixel_shift_timer.stop()
+        
+        # 更新状态
+        self.status_label.setText("屏幕保护已激活 | 移动鼠标或按键退出")
+        
+    def deactivate_screensaver(self):
+        """停用屏幕保护"""
+        self.is_screensaver_active = False
+        
+        # 恢复亮度
+        self.restore_brightness()
+        
+        # 重新启动像素移动
+        if self.burn_in_protection_enabled:
+            self.pixel_shift_timer.start(self.pixel_shift_interval * 1000)
+            
+        # 更新状态
+        self.status_label.setText("点击右键显示菜单 | 防烧屏保护已启用")
+        
+    def apply_brightness_reduction(self):
+        """应用亮度减少"""
+        # 这里使用CSS滤镜来降低亮度
+        self.time_label.setStyleSheet(
+            self.time_label.styleSheet() + 
+            f" opacity: {self.brightness_reduction};"
+        )
+        
+    def restore_brightness(self):
+        """恢复原始亮度"""
+        # 移除亮度滤镜
+        style = self.time_label.styleSheet()
+        if "opacity:" in style:
+            # 移除opacity属性
+            lines = style.split(';')
+            lines = [line for line in lines if not line.strip().startswith('opacity:')]
+            new_style = ';'.join(lines)
+            self.time_label.setStyleSheet(new_style)
+            
+    def mouseMoveEvent(self, event):
+        """鼠标移动事件 - 用于检测活动"""
+        super().mouseMoveEvent(event)
+        self.last_activity_time = time.time()
+        
+    def keyPressEvent(self, event):
+        """按键事件"""
+        super().keyPressEvent(event)
+        
+        # ESC键退出全屏
+        if event.key() == Qt.Key_Escape and self.is_fullscreen:
+            self.toggle_fullscreen()
+            
+        # 空格键切换显示模式
+        elif event.key() == Qt.Key_Space:
+            if self.status_label.isVisible():
+                self.set_display_mode('minimal')
+            else:
+                self.set_display_mode('normal')
+                
+        # F11键切换全屏
+        elif event.key() == Qt.Key_F11:
+            self.toggle_fullscreen()
+            
+        # 更新最后活动时间
+        self.last_activity_time = time.time()
+        
+    def closeEvent(self, event):
+        """关闭事件"""
+        # 停止所有定时器
+        self.screensaver_timer.stop()
+        self.pixel_shift_timer.stop()
+        
+        # 通知父窗口
+        if self.parent_timer:
+            self.parent_timer.time_display_window = None
+            
+        event.accept()
 
 # 马卡龙色系定义
 class MacaronColors_12:
@@ -335,7 +891,12 @@ class SettingsManager:
             "window_shake": True,
             "window_flash": True,
             "taskbar_flash": True,
-            "show_alert_dialog": True
+            "show_alert_dialog": True,
+            # 新增：纯时间显示窗口设置
+            "time_display_window_geometry": None,
+            "time_display_burnin_protection": True,
+            "time_display_pixel_shift_interval": 300,
+            "time_display_color_theme": "auto"
         }
         self.settings = self.load_settings()
     
@@ -393,6 +954,9 @@ class TimerWindow(QMainWindow):
         self.alarm_sound = None
         self.current_timer_type = None
         self.current_duration = 0
+        
+        # 新增：纯时间显示窗口
+        self.time_display_window = None
 
         # 新增：初始化标记
         self._is_initializing = False
@@ -502,7 +1066,7 @@ class TimerWindow(QMainWindow):
         layout = QVBoxLayout(timer_tab)
         layout.setSpacing(15)
         
-        # 时间显示
+        # 时间显示 - 添加点击事件
         self.timer_display = QLabel('00:00:00')
         self.timer_display.setAlignment(Qt.AlignCenter)
         display_font = QFont()
@@ -523,6 +1087,10 @@ class TimerWindow(QMainWindow):
                 margin: 10px;
             }
         """)
+        
+        # 新增：为时间显示标签添加鼠标点击事件
+        self.timer_display.mousePressEvent = self.on_timer_display_clicked
+        
         layout.addWidget(self.timer_display)
         
         # 进度条
@@ -603,7 +1171,7 @@ class TimerWindow(QMainWindow):
         time_group.setLayout(time_layout)
         layout.addWidget(time_group)
         
-        # 倒计时显示
+        # 倒计时显示 - 添加点击事件
         self.countdown_display = QLabel('00:00:00')
         self.countdown_display.setAlignment(Qt.AlignCenter)
         display_font = QFont()
@@ -623,6 +1191,10 @@ class TimerWindow(QMainWindow):
                 margin: 10px;
             }
         """)
+        
+        # 新增：为倒计时显示标签添加鼠标点击事件
+        self.countdown_display.mousePressEvent = self.on_countdown_display_clicked
+        
         layout.addWidget(self.countdown_display)
         
         # 倒计时进度条
@@ -840,7 +1412,104 @@ class TimerWindow(QMainWindow):
 
         # 创建关于标签页
         self.create_about_tab()
+    
+    # 新增：时间显示标签点击事件处理
+    def on_timer_display_clicked(self, event):
+        """计时器时间显示标签点击事件"""
+        if event.button() == Qt.LeftButton:
+            self.show_time_display_window('timer', self.timer_display.text())
+            
+    def on_countdown_display_clicked(self, event):
+        """倒计时时间显示标签点击事件"""
+        if event.button() == Qt.LeftButton:
+            current_text = self.countdown_display.text()
+            # 如果显示的是00:00:00，使用设置的时间
+            if current_text == '00:00:00':
+                hours = self.hour_spin.value()
+                minutes = self.minute_spin.value()
+                seconds = self.second_spin.value()
+                total_seconds = hours * 3600 + minutes * 60 + seconds
+                current_text = self.seconds_to_time_str(total_seconds)
+            self.show_time_display_window('countdown', current_text)
+            
+    def show_time_display_window(self, timer_type, initial_time):
+        """显示纯时间显示窗口"""
+        # 如果窗口已存在，先关闭
+        if self.time_display_window:
+            self.time_display_window.close()
+            
+        # 创建新窗口
+        self.time_display_window = TimeDisplayWindow(self, timer_type, initial_time)
         
+        # 加载保存的窗口位置和大小
+        saved_geometry = self.settings_manager.settings.get('time_display_window_geometry')
+        if saved_geometry:
+            self.time_display_window.restoreGeometry(QByteArray.fromHex(saved_geometry.encode()))
+        else:
+            # 默认位置：主屏幕的右侧
+            screen_geometry = QApplication.desktop().screenGeometry()
+            default_width = screen_geometry.width() // 3
+            default_height = screen_geometry.height() // 2
+            x = screen_geometry.width() - default_width - 50
+            y = screen_geometry.height() // 2 - default_height // 2
+            self.time_display_window.setGeometry(x, y, default_width, default_height)
+        
+        # 设置防烧屏保护
+        burnin_enabled = self.settings_manager.settings.get('time_display_burnin_protection', True)
+        self.time_display_window.burn_in_protection_enabled = burnin_enabled
+        
+        # 设置像素移动间隔
+        shift_interval = self.settings_manager.settings.get('time_display_pixel_shift_interval', 300)
+        self.time_display_window.pixel_shift_interval = shift_interval
+        
+        # 设置颜色主题
+        color_theme = self.settings_manager.settings.get('time_display_color_theme', 'auto')
+        if color_theme != 'auto':
+            self.time_display_window.set_color_theme(color_theme)
+        
+        # 连接时间更新信号
+        if timer_type == 'timer' and self.timer_thread:
+            # 断开之前的连接
+            try:
+                self.timer_thread.update_signal.disconnect()
+            except:
+                pass
+            # 重新连接，同时更新主窗口和时间显示窗口
+            self.timer_thread.update_signal.connect(self.update_timer_display)
+            self.timer_thread.update_signal.connect(
+                lambda t, p: self.time_display_window.update_time(t, p)
+            )
+            # 更新状态
+            self.time_display_window.update_time_style(self.timer_state)
+        elif timer_type == 'countdown' and self.timer_thread:
+            # 断开之前的连接
+            try:
+                self.timer_thread.update_signal.disconnect()
+            except:
+                pass
+            # 重新连接，同时更新主窗口和时间显示窗口
+            self.timer_thread.update_signal.connect(self.update_countdown_display)
+            self.timer_thread.update_signal.connect(
+                lambda t, p: self.time_display_window.update_time(t, p)
+            )
+            # 更新状态
+            self.time_display_window.update_time_style(self.countdown_state)
+        
+        # 显示窗口
+        self.time_display_window.show()
+        
+        # 修改：延迟调整字体大小，确保窗口已完全显示
+        QTimer.singleShot(100, self.time_display_window.adjust_font_size)
+        
+        # 状态栏提示
+        self.status_bar.showMessage(f'纯时间显示窗口已打开 - {timer_type}')
+        
+    def save_time_display_window_geometry(self):
+        """保存纯时间显示窗口的几何信息"""
+        if self.time_display_window:
+            geometry = self.time_display_window.saveGeometry().toHex().data().decode()
+            self.settings_manager.update_setting('time_display_window_geometry', geometry)
+            
     def setup_tray_icon(self):
         """设置系统托盘图标"""
         if QSystemTrayIcon.isSystemTrayAvailable():
@@ -856,6 +1525,19 @@ class TimerWindow(QMainWindow):
             
             show_action = tray_menu.addAction("显示窗口")
             show_action.triggered.connect(self.show_window)
+            
+            # 新增：显示时间显示窗口选项
+            if self.time_display_window:
+                hide_time_display_action = tray_menu.addAction("隐藏时间显示窗口")
+                hide_time_display_action.triggered.connect(self.time_display_window.hide)
+            else:
+                show_time_display_action = tray_menu.addAction("显示时间显示窗口")
+                show_time_display_action.triggered.connect(
+                    lambda: self.show_time_display_window(
+                        self.current_timer_type or 'timer',
+                        self.timer_display.text()
+                    )
+                )
             
             tray_menu.addSeparator()
             
@@ -882,6 +1564,9 @@ class TimerWindow(QMainWindow):
     def closeEvent(self, event):
         """关闭事件"""
         try:
+            # 保存时间显示窗口的几何信息
+            self.save_time_display_window_geometry()
+            
             # 清理资源
             self.cleanup_resources()
             
@@ -1054,15 +1739,30 @@ class TimerWindow(QMainWindow):
         
         self.current_timer_type = 'timer'
         self.current_duration = 0  # 计时器没有固定时长
-    
+
         # 更新计时器状态为运行中
         self.timer_state = 'running'
         self.update_timer_display_style()
-    
+
         self.timer_thread = TimerThread(0, False)
         self.timer_thread.update_signal.connect(self.update_timer_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
+        
+        # 新增：如果时间显示窗口存在，连接信号
+        if self.time_display_window:
+            # 断开之前的连接（如果存在）
+            try:
+                self.timer_thread.update_signal.disconnect()
+            except:
+                pass
+            # 重新连接，同时更新主窗口和时间显示窗口
+            self.timer_thread.update_signal.connect(self.update_timer_display)
+            self.timer_thread.update_signal.connect(
+                lambda t, p: self.time_display_window.update_time(t, p) 
+                if self.time_display_window else None
+            )
+            self.time_display_window.update_time_style('running')
         
         self.start_timer_btn.setEnabled(False)
         self.pause_timer_btn.setEnabled(True)
@@ -1085,6 +1785,10 @@ class TimerWindow(QMainWindow):
                 self.timer_state = 'paused'
                 self.update_timer_display_style()
             
+                # 新增：如果时间显示窗口存在，更新状态
+                if self.time_display_window:
+                    self.time_display_window.update_time_style('paused')
+            
                 # 新增：暂停时显示黄色进度条
                 if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
                     try:
@@ -1100,6 +1804,10 @@ class TimerWindow(QMainWindow):
                 self.timer_state = 'running'
                 self.update_timer_display_style()
 
+                # 新增：如果时间显示窗口存在，更新状态
+                if self.time_display_window:
+                    self.time_display_window.update_time_style('running')
+            
                 # 新增：恢复时继续显示进度条
                 if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
                     try:
@@ -1124,6 +1832,11 @@ class TimerWindow(QMainWindow):
         self.pause_timer_btn.setText('暂停')
         self.reset_timer_btn.setEnabled(True)
         
+        # 新增：如果时间显示窗口存在，更新状态
+        if self.time_display_window:
+            self.time_display_window.update_time('00:00:00')
+            self.time_display_window.update_time_style('stopped')
+        
         # 新增：隐藏任务栏进度
         self.show_taskbar_progress(False)
         
@@ -1146,7 +1859,7 @@ class TimerWindow(QMainWindow):
         
         self.current_timer_type = 'countdown'
         self.current_duration = total_seconds
-    
+
         # 更新倒计时状态为运行中
         self.countdown_state = 'running'
         self.update_countdown_display_style()
@@ -1162,6 +1875,21 @@ class TimerWindow(QMainWindow):
         self.timer_thread.update_signal.connect(self.update_countdown_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
+        
+        # 新增：如果时间显示窗口存在，连接信号
+        if self.time_display_window:
+            # 断开之前的连接（如果存在）
+            try:
+                self.timer_thread.update_signal.disconnect()
+            except:
+                pass
+            # 重新连接，同时更新主窗口和时间显示窗口
+            self.timer_thread.update_signal.connect(self.update_countdown_display)
+            self.timer_thread.update_signal.connect(
+                lambda t, p: self.time_display_window.update_time(t, p) 
+                if self.time_display_window else None
+            )
+            self.time_display_window.update_time_style('running')
         
         self.start_countdown_btn.setEnabled(False)
         self.pause_countdown_btn.setEnabled(True)
@@ -1185,6 +1913,10 @@ class TimerWindow(QMainWindow):
                 self.countdown_state = 'paused'
                 self.update_countdown_display_style()
             
+                # 新增：如果时间显示窗口存在，更新状态
+                if self.time_display_window:
+                    self.time_display_window.update_time_style('paused')
+            
                 # 新增：暂停时显示黄色进度条
                 if self.taskbar_progress:
                     try:
@@ -1199,6 +1931,10 @@ class TimerWindow(QMainWindow):
                 # 更新倒计时状态为运行中
                 self.countdown_state = 'running'
                 self.update_countdown_display_style()
+            
+                # 新增：如果时间显示窗口存在，更新状态
+                if self.time_display_window:
+                    self.time_display_window.update_time_style('running')
             
                 # 新增：恢复时继续显示进度条
                 if self.taskbar_progress:
@@ -1230,6 +1966,11 @@ class TimerWindow(QMainWindow):
         self.pause_countdown_btn.setText('暂停')
         self.reset_countdown_btn.setEnabled(True)
         
+        # 新增：如果时间显示窗口存在，更新状态
+        if self.time_display_window:
+            self.time_display_window.update_time(self.seconds_to_time_str(total_seconds))
+            self.time_display_window.update_time_style('stopped')
+        
         # 更新系统托盘提示
         if hasattr(self, 'tray_icon'):
             self.tray_icon.setToolTip('多功能计时器')
@@ -1253,6 +1994,10 @@ class TimerWindow(QMainWindow):
         # 设置时间时更新样式为停止状态（蓝色）
         self.countdown_state = 'stopped'
         self.update_countdown_display_style()
+
+        # 新增：如果时间显示窗口存在，更新时间
+        if self.time_display_window and self.current_timer_type == 'countdown':
+            self.time_display_window.update_time(self.seconds_to_time_str(seconds))
 
     def update_timer_display(self, time_str, progress):
         """更新计时器显示"""
@@ -1625,6 +2370,10 @@ class TimerWindow(QMainWindow):
             # 更新系统托盘提示
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.setToolTip('多功能计时器')
+            
+            # 新增：更新时间显示窗口
+            if self.time_display_window:
+                self.time_display_window.update_time_style('stopped')
             
             self.status_bar.showMessage('时间到！')
             print("所有提醒效果已执行完毕")
@@ -2144,6 +2893,10 @@ class TimerWindow(QMainWindow):
                 
             if self.taskbar_timer and self.taskbar_timer.isActive():
                 self.taskbar_timer.stop()
+                
+            # 关闭时间显示窗口
+            if self.time_display_window:
+                self.time_display_window.close()
                 
         except Exception as e:
             print(f"清理资源时出错: {e}")
