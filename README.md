@@ -20,7 +20,7 @@
 
 <img width="800" height="720" alt="image" src="https://github.com/user-attachments/assets/75027ff0-c42e-4890-92c5-a9483f008d32" />
 
-# 软件截图 v2.10.0 增加时间显示窗口，可以缩放大小或者全屏或者最大化，右键菜单有设置选项
+# 软件截图 v2.11.0 增加时间显示窗口，可以缩放大小或者全屏或者最大化，右键菜单有设置选项
 
 <img width="2478" height="851" alt="image" src="https://github.com/user-attachments/assets/edbca5b5-1ab4-4b41-960f-d0ee8e6f9c31" />
 
