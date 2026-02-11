@@ -6,6 +6,10 @@ import time
 import datetime
 import warnings
 import math
+import socket
+import struct
+import time as systime
+from datetime import datetime, timedelta
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, message="sipPyTypeDict")
 
@@ -28,7 +32,7 @@ from datetime import datetime
 
 class ProjectInfo:
     """项目信息元数据（集中管理所有项目相关信息）"""
-    VERSION = "2.11.0"
+    VERSION = "2.12.0"
     BUILD_DATE = "2026-06-28"
     from datetime import datetime
     # BUILD_DATE = datetime.now().strftime("%Y-%m-%d")  # 修改为动态获取当前日期
@@ -50,7 +54,24 @@ class ProjectInfo:
 8. 状态颜色指示：不同状态（运行/暂停/停止）使用不同颜色显示
 9. 纯时间显示窗口：点击时间标签弹出全屏时间显示窗口，带防烧屏保护
 """
-
+    
+    # 新增：NTP服务器列表
+    NTP_SERVERS = [
+        # 新增：阿里云全套NTP服务器
+        'ntp1.aliyun.com',
+        'ntp2.aliyun.com',
+        'ntp3.aliyun.com',
+        'ntp4.aliyun.com',
+        'ntp5.aliyun.com',
+        'ntp6.aliyun.com',
+        'ntp7.aliyun.com',
+        'pool.ntp.org',            # NTP池项目
+        'cn.pool.ntp.org',         # 中国NTP池
+        'time.apple.com',         # 苹果时间服务器
+        'ntp.aliyun.com',         # 阿里云NTP服务器
+    ]
+    
+    # 在VERSION_HISTORY中添加新版本说明
     VERSION_HISTORY = {
         "1.0": "初始化版本 - 基础计时器和倒计时功能",
         "1.1": "修改最小化到托盘的默认情况",
@@ -68,7 +89,8 @@ class ProjectInfo:
         "2.9.1": "增加关于对话框详细信息，优化用户界面和交互体验",
         "2.10.0": "增加纯时间显示窗口功能，带防烧屏保护和自适应缩放",
         "2.10.1": "优化纯时间显示窗口的防烧屏保护功能，增加更多自定义选项",
-        "2.11.0": "优化纯时间显示窗口的字体自适应缩放，提升用户体验"
+        "2.11.0": "优化纯时间显示窗口的字体自适应缩放，提升用户体验",
+        "2.12.0": "增加NTP时间服务器校时功能，确保计时准确性"
     }
 
     HELP_TEXT = """
@@ -166,6 +188,7 @@ class ProjectInfo:
                 "自定义铃声 - 支持多种音频格式",
                 "状态颜色指示 - 运行/暂停/停止不同颜色",
                 "预设功能 - 常用时间预设和自定义预设",
+                "NTP时间服务器校时 - 确保计时准确性",
                 "纯时间显示窗口 - 全屏时间显示，带防烧屏保护"
             ],
             "system_requirements": [
@@ -223,6 +246,164 @@ class ProjectInfo:
         msg_box.layout().addWidget(text_browser, 1, 0, 1, msg_box.layout().columnCount())
         msg_box.setStandardButtons(QMessageBox.Ok)
         msg_box.exec_()
+
+class NTPTimeSync:
+    """NTP时间同步工具类"""
+    
+    NTP_PORT = 123
+    TIMEOUT = 5  # 连接超时时间（秒）
+    
+    @staticmethod
+    def ntp_request(server='time.windows.com', port=123):
+        """向NTP服务器请求时间"""
+        try:
+            # 创建UDP套接字
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(NTPTimeSync.TIMEOUT)
+            
+            # 连接服务器
+            server_addr = (server, port)
+            
+            # 构建NTP请求数据包
+            data = b'\x1b' + 47 * b'\0'
+            
+            # 发送请求
+            sock.sendto(data, server_addr)
+            
+            # 接收响应
+            data, _ = sock.recvfrom(1024)
+            
+            # 关闭套接字
+            sock.close()
+            
+            if len(data) >= 48:
+                # 解析NTP响应
+                # 解析传输时间戳（第40-47字节）
+                transmit_timestamp = data[40:48]
+                
+                # 将字节转换为整数
+                int_part = struct.unpack('!I', transmit_timestamp[:4])[0]
+                frac_part = struct.unpack('!I', transmit_timestamp[4:])[0]
+                
+                # 转换为秒数（自1900年以来的秒数）
+                ntp_time = int_part + frac_part / 2**32 - 2208988800
+                
+                return ntp_time
+            else:
+                return None
+                
+        except socket.timeout:
+            print(f"连接NTP服务器 {server} 超时")
+            return None
+        except socket.gaierror:
+            print(f"无法解析NTP服务器地址: {server}")
+            return None
+        except Exception as e:
+            print(f"NTP请求失败 {server}: {e}")
+            return None
+    
+    @staticmethod
+    def get_ntp_time(server_list=None):
+        """从多个NTP服务器获取时间，选择最快响应的"""
+        if server_list is None:
+            server_list = ProjectInfo.NTP_SERVERS
+        
+        best_time = None
+        best_server = None
+        min_latency = float('inf')
+        
+        for server in server_list:
+            try:
+                start_time = systime.time()
+                ntp_time = NTPTimeSync.ntp_request(server)
+                end_time = systime.time()
+                
+                if ntp_time is not None:
+                    latency = end_time - start_time
+                    
+                    # 计算网络延迟补偿后的时间
+                    corrected_time = ntp_time + latency / 2
+                    
+                    # 如果这是最快的响应或第一个有效响应
+                    if latency < min_latency or best_time is None:
+                        min_latency = latency
+                        best_time = corrected_time
+                        best_server = server
+                        
+            except Exception as e:
+                print(f"从 {server} 获取时间失败: {e}")
+                continue
+        
+        if best_time is not None:
+            return {
+                'timestamp': best_time,
+                'server': best_server,
+                'latency': min_latency,
+                'local_time': systime.time(),
+                'offset': best_time - systime.time()
+            }
+        else:
+            return None
+    
+    @staticmethod
+    def get_formatted_ntp_time(server_list=None):
+        """获取格式化的NTP时间"""
+        result = NTPTimeSync.get_ntp_time(server_list)
+        
+        if result:
+            # 转换为datetime对象
+            ntp_datetime = datetime.fromtimestamp(result['timestamp'])
+            local_datetime = datetime.fromtimestamp(result['local_time'])
+            
+            return {
+                'ntp_time': ntp_datetime,
+                'local_time': local_datetime,
+                'server': result['server'],
+                'latency': result['latency'],
+                'offset': result['offset'],
+                'formatted_ntp': ntp_datetime.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                'formatted_local': local_datetime.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            }
+        else:
+            return None
+    
+    @staticmethod
+    def test_all_servers():
+        """测试所有NTP服务器的响应"""
+        results = []
+        
+        for server in ProjectInfo.NTP_SERVERS:
+            try:
+                start = systime.time()
+                ntp_time = NTPTimeSync.ntp_request(server)
+                end = systime.time()
+                
+                if ntp_time:
+                    latency = end - start
+                    offset = ntp_time - end
+                    results.append({
+                        'server': server,
+                        'latency': latency,
+                        'offset': offset,
+                        'status': '可用'
+                    })
+                else:
+                    results.append({
+                        'server': server,
+                        'latency': None,
+                        'offset': None,
+                        'status': '不可用'
+                    })
+                    
+            except Exception as e:
+                results.append({
+                    'server': server,
+                    'latency': None,
+                    'offset': None,
+                    'status': f'错误: {str(e)}'
+                })
+        
+        return results
 
 # 新增：纯时间显示窗口类
 class TimeDisplayWindow(QMainWindow):
@@ -318,7 +499,14 @@ class TimeDisplayWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #888888; font-size: 12px; margin-top: 10px;")
         self.status_label.hide()  # 默认隐藏状态标签
         main_layout.addWidget(self.status_label)
-        
+
+        # 在状态标签中显示NTP状态
+        if self.parent_timer and hasattr(self.parent_timer, 'ntp_sync_enabled') and self.parent_timer.ntp_sync_enabled:
+            ntp_status = "NTP已同步" if self.parent_timer.ntp_last_sync_time else "NTP同步中"
+            self.status_label.setText(f"点击右键显示菜单 | 防烧屏保护已启用 | {ntp_status}")
+        else:
+            self.status_label.setText("点击右键显示菜单 | 防烧屏保护已启用")
+
         # 设置初始窗口大小
         self.resize(800, 400)
         
@@ -795,47 +983,67 @@ class TimerThread(QThread):
     update_signal = pyqtSignal(str, int)  # 更新时间信号
     alarm_signal = pyqtSignal()  # 闹钟信号
     
-    def __init__(self, duration_seconds, is_countdown=False):
+    def __init__(self, duration_seconds, is_countdown=False, use_ntp=False):
         super().__init__()
         self.duration = duration_seconds
         self.is_countdown = is_countdown
+        self.use_ntp = use_ntp
         self.is_running = True
         self.is_paused = False
         self.pause_lock = threading.Lock()
         self.elapsed = 0
+        self.start_time = None
         
+    def get_current_time(self):
+        """获取当前时间（如果启用NTP则使用校正后的时间）"""
+        if self.use_ntp and hasattr(self, 'parent_window'):
+            return self.parent_window.get_corrected_time()
+        else:
+            return systime.time()
+    
     def run(self):
         if self.is_countdown:
             remaining = self.duration
+            start_time = self.get_current_time()
+            
             while remaining > 0 and self.is_running:
                 if not self.is_paused:
-                    mins, secs = divmod(remaining, 60)
+                    # 使用更准确的时间计算
+                    current_time = self.get_current_time()
+                    elapsed_since_start = current_time - start_time
+                    remaining = max(0, self.duration - elapsed_since_start)
+                    
+                    mins, secs = divmod(int(remaining), 60)
                     hours, mins = divmod(mins, 60)
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
                     
-                    # 修复：计算剩余时间的百分比，从100%递减到0%
+                    # 计算进度
                     if self.duration > 0:
                         progress = int((self.duration - remaining) * 100 / self.duration)
-                        # 确保进度不超过100%
                         progress = min(progress, 100)
                     else:
                         progress = 0
                     
                     self.update_signal.emit(time_str, progress)
-                    remaining -= 1
-                    time.sleep(1)
+                    time.sleep(0.1)  # 更频繁的更新以提高准确性
                 else:
+                    # 暂停时更新开始时间
+                    start_time = self.get_current_time() - (self.duration - remaining)
                     time.sleep(0.1)
                     
-            if remaining == 0:
-                # 时间到，发送100%的进度
+            if remaining <= 0:
                 self.update_signal.emit("00:00:00", 100)
                 self.alarm_signal.emit()
         else:
             self.elapsed = 0
+            start_time = self.get_current_time()
+            
             while self.is_running:
                 if not self.is_paused:
-                    mins, secs = divmod(self.elapsed, 60)
+                    current_time = self.get_current_time()
+                    self.elapsed = current_time - start_time
+                    
+                    mins, secs = divmod(int(self.elapsed), 60)
                     hours, mins = divmod(mins, 60)
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
                     
@@ -844,12 +1052,13 @@ class TimerThread(QThread):
                         progress = min(self.elapsed * 100 // max(self.duration, 1), 100)
                     else:
                         # 无限制计时器，每60秒一个周期
-                        progress = self.elapsed % 60 * 100 // 60
+                        progress = int(self.elapsed) % 60 * 100 // 60
                     
                     self.update_signal.emit(time_str, progress)
-                    self.elapsed += 1
-                    time.sleep(1)
+                    time.sleep(0.1)  # 更频繁的更新以提高准确性
                 else:
+                    # 暂停时更新开始时间
+                    start_time = self.get_current_time() - self.elapsed
                     time.sleep(0.1)
     
     def pause(self):
@@ -896,7 +1105,12 @@ class SettingsManager:
             "time_display_window_geometry": None,
             "time_display_burnin_protection": True,
             "time_display_pixel_shift_interval": 300,
-            "time_display_color_theme": "auto"
+            "time_display_color_theme": "auto",
+            # 新增：NTP校时设置
+            "ntp_sync_enabled": False,
+            "ntp_sync_interval": 3600,  # 默认1小时
+            "ntp_last_sync_time": None,
+            "ntp_time_offset": 0.0,
         }
         self.settings = self.load_settings()
     
@@ -947,6 +1161,11 @@ class CustomProgressBar(QProgressBar):
         """)
 
 class TimerWindow(QMainWindow):
+    # 在类定义中添加信号
+    ntp_sync_success = pyqtSignal(dict)
+    ntp_sync_failed = pyqtSignal(str)
+    server_test_complete = pyqtSignal(list)
+
     def __init__(self):
         super().__init__()
         self.settings_manager = SettingsManager()
@@ -955,6 +1174,14 @@ class TimerWindow(QMainWindow):
         self.current_timer_type = None
         self.current_duration = 0
         
+        # 新增：NTP校时相关属性
+        self.ntp_time_offset = 0.0  # NTP时间与本地时间的偏移量（秒）
+        self.ntp_sync_enabled = False  # 是否启用NTP同步
+        self.ntp_last_sync_time = None  # 上次同步时间
+        self.ntp_sync_interval = 3600  # 同步间隔（秒，默认1小时）
+        self.ntp_sync_timer = None  # 自动同步定时器
+        
+
         # 新增：纯时间显示窗口
         self.time_display_window = None
 
@@ -991,7 +1218,21 @@ class TimerWindow(QMainWindow):
         
         # 初始化任务栏进度条
         self.init_taskbar_progress()
-    
+
+        
+        # 连接NTP相关信号
+        self.ntp_sync_success.connect(self.on_ntp_sync_success)
+        self.ntp_sync_failed.connect(self.on_ntp_sync_failed)
+        self.server_test_complete.connect(self.on_server_test_complete)
+
+        # 新增：初始化NTP同步定时器
+        self.init_ntp_sync()
+        
+    def init_ntp_sync(self):
+        """初始化NTP同步"""
+        self.ntp_sync_timer = QTimer(self)
+        self.ntp_sync_timer.timeout.connect(self.auto_ntp_sync)
+        
     def init_ui(self):
         """初始化界面"""
         # self.setWindowTitle('多功能计时器')
@@ -1394,7 +1635,7 @@ class TimerWindow(QMainWindow):
     
         window_group.setLayout(window_layout)
         layout.addWidget(window_group)
-        
+
         # 重置设置
         reset_group = QGroupBox('重置设置')
         reset_layout = QHBoxLayout()
@@ -1410,9 +1651,195 @@ class TimerWindow(QMainWindow):
         layout.addStretch()
         self.tab_widget.addTab(settings_tab, "⚙️ 设置")
 
+        # 创建NTP时间同步标签页
+        self.create_ntp_tab()
+
         # 创建关于标签页
         self.create_about_tab()
-    
+
+    def create_ntp_tab(self):
+        """创建NTP时间同步标签页"""
+        ntp_tab = QWidget()
+        layout = QVBoxLayout(ntp_tab)
+        layout.setSpacing(15)
+        
+        # 标题
+        title_label = QLabel('NTP时间服务器同步设置')
+        title_label.setAlignment(Qt.AlignCenter)
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet("color: #2196F3; padding: 10px;")
+        layout.addWidget(title_label)
+        
+        # 说明文字
+        info_label = QLabel('通过NTP（网络时间协议）服务器同步系统时间，确保计时准确性')
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; padding: 5px; font-style: italic;")
+        layout.addWidget(info_label)
+        
+        # 主设置区域
+        settings_group = QGroupBox('NTP同步设置')
+        settings_layout = QVBoxLayout()
+        
+        # 启用NTP同步
+        enable_layout = QHBoxLayout()
+        self.ntp_enable_checkbox = QCheckBox('启用NTP时间自动同步')
+        self.ntp_enable_checkbox.stateChanged.connect(self.toggle_ntp_sync)
+        enable_layout.addWidget(self.ntp_enable_checkbox)
+        enable_layout.addStretch()
+        settings_layout.addLayout(enable_layout)
+        
+        settings_layout.addSpacing(10)
+        
+        # 同步间隔设置
+        interval_group = QGroupBox('自动同步间隔')
+        interval_layout = QVBoxLayout()
+        
+        interval_combo_layout = QHBoxLayout()
+        interval_combo_layout.addWidget(QLabel('同步间隔:'))
+        
+        self.ntp_interval_combo = QComboBox()
+        self.ntp_interval_combo.addItems(['15分钟', '30分钟', '1小时', '2小时', '6小时', '12小时', '24小时'])
+        self.ntp_interval_combo.setCurrentText('1小时')
+        self.ntp_interval_combo.currentTextChanged.connect(self.change_ntp_interval)
+        interval_combo_layout.addWidget(self.ntp_interval_combo)
+        interval_combo_layout.addStretch()
+        
+        interval_layout.addLayout(interval_combo_layout)
+        interval_group.setLayout(interval_layout)
+        settings_layout.addWidget(interval_group)
+        
+        settings_layout.addSpacing(10)
+        
+        # 状态显示区域
+        status_group = QGroupBox('同步状态')
+        status_layout = QVBoxLayout()
+        
+        self.ntp_status_label = QLabel('状态: 未同步')
+        self.ntp_status_label.setStyleSheet("color: gray; font-style: italic; font-size: 14px;")
+        status_layout.addWidget(self.ntp_status_label)
+        
+        self.ntp_offset_label = QLabel('时间偏移: 0.000 秒')
+        self.ntp_offset_label.setStyleSheet("color: #666; font-size: 14px;")
+        status_layout.addWidget(self.ntp_offset_label)
+        
+        if self.ntp_last_sync_time:
+            sync_time_label = QLabel(f'上次同步: {self.ntp_last_sync_time.strftime("%Y-%m-%d %H:%M:%S")}')
+            sync_time_label.setStyleSheet("color: #666; font-size: 12px;")
+            status_layout.addWidget(sync_time_label)
+        
+        status_group.setLayout(status_layout)
+        settings_layout.addWidget(status_group)
+        
+        settings_layout.addSpacing(15)
+        
+        # 手动同步按钮
+        sync_buttons_layout = QHBoxLayout()
+        
+        manual_sync_btn = QPushButton('🔄 立即手动同步')
+        manual_sync_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        manual_sync_btn.clicked.connect(self.manual_ntp_sync)
+        manual_sync_btn.setMinimumHeight(40)
+        manual_sync_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        sync_buttons_layout.addWidget(manual_sync_btn)
+        
+        test_servers_btn = QPushButton('📡 测试NTP服务器')
+        test_servers_btn.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        test_servers_btn.clicked.connect(self.test_ntp_servers)
+        test_servers_btn.setMinimumHeight(40)
+        test_servers_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0b7dda;
+            }
+        """)
+        sync_buttons_layout.addWidget(test_servers_btn)
+        
+        settings_layout.addLayout(sync_buttons_layout)
+        
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+        
+        # NTP服务器列表
+        servers_group = QGroupBox('NTP服务器列表')
+        servers_layout = QVBoxLayout()
+        
+        servers_info = QLabel('可用的NTP时间服务器：')
+        servers_info.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
+        servers_layout.addWidget(servers_info)
+        
+        # 创建服务器列表
+        servers_list = QTextBrowser()
+        servers_list.setMaximumHeight(150)
+        servers_list.setOpenExternalLinks(False)
+        
+        servers_html = "<ul style='margin: 5px; padding-left: 15px;'>"
+        for i, server in enumerate(ProjectInfo.NTP_SERVERS, 1):
+            servers_html += f"<li>{server}</li>"
+        servers_html += "</ul>"
+        
+        servers_list.setHtml(servers_html)
+        servers_list.setReadOnly(True)
+        servers_layout.addWidget(servers_list)
+        
+        # 服务器说明
+        servers_note = QLabel('注意：程序会自动选择响应最快的服务器进行时间同步')
+        servers_note.setStyleSheet("color: #666; font-size: 12px; font-style: italic; margin-top: 5px;")
+        servers_layout.addWidget(servers_note)
+        
+        servers_group.setLayout(servers_layout)
+        layout.addWidget(servers_group)
+        
+        # 使用说明
+        usage_group = QGroupBox('使用说明')
+        usage_layout = QVBoxLayout()
+        
+        usage_text = QTextBrowser()
+        usage_text.setMaximumHeight(120)
+        usage_text.setHtml("""
+        <h4>NTP时间同步功能说明：</h4>
+        <ul>
+        <li><b>启用自动同步</b>：程序会定期从NTP服务器获取准确时间，修正计时器偏差</li>
+        <li><b>时间偏移</b>：显示本地时间与NTP服务器时间的差异，正值表示本地时间比NTP时间快</li>
+        <li><b>测试服务器</b>：可以测试各个NTP服务器的响应速度和可用性</li>
+        <li><b>手动同步</b>：立即执行一次时间同步操作</li>
+        </ul>
+        <p style='color: #f44336;'><b>注意：</b>NTP同步仅修正计时器内部时间，不会修改系统时间。如需修改系统时间，请在操作系统中设置。</p>
+        """)
+        usage_text.setReadOnly(True)
+        usage_layout.addWidget(usage_text)
+        
+        usage_group.setLayout(usage_layout)
+        layout.addWidget(usage_group)
+        
+        layout.addStretch()
+        
+        # 添加到选项卡
+        self.tab_widget.addTab(ntp_tab, "🕒 NTP校时")
+
+
+
     # 新增：时间显示标签点击事件处理
     def on_timer_display_clicked(self, event):
         """计时器时间显示标签点击事件"""
@@ -1744,7 +2171,11 @@ class TimerWindow(QMainWindow):
         self.timer_state = 'running'
         self.update_timer_display_style()
 
-        self.timer_thread = TimerThread(0, False)
+        # 使用NTP时间（如果启用）
+        use_ntp = self.ntp_sync_enabled
+        self.timer_thread = TimerThread(0, False, use_ntp)
+        self.timer_thread.parent_window = self  # 传递父窗口引用以获取校正时间
+    
         self.timer_thread.update_signal.connect(self.update_timer_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
@@ -1871,7 +2302,11 @@ class TimerWindow(QMainWindow):
         if hasattr(self, 'tray_icon'):
             self.tray_icon.setToolTip(f'倒计时: {self.seconds_to_time_str(total_seconds)}')
         
-        self.timer_thread = TimerThread(total_seconds, True)
+        # 使用NTP时间（如果启用）
+        use_ntp = self.ntp_sync_enabled
+        self.timer_thread = TimerThread(total_seconds, True, use_ntp)
+        self.timer_thread.parent_window = self  # 传递父窗口引用以获取校正时间
+    
         self.timer_thread.update_signal.connect(self.update_countdown_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
@@ -3173,6 +3608,235 @@ class TimerWindow(QMainWindow):
     def show_about_detail_dialog(self):
         """显示详细的关于对话框"""
         ProjectInfo.show_about_dialog(self)
+
+    def toggle_ntp_sync(self, state):
+        """切换NTP同步设置"""
+        self.ntp_sync_enabled = bool(state)
+        
+        if state:
+            # 启用自动同步
+            self.start_auto_ntp_sync()
+            self.status_bar.showMessage('NTP时间同步已启用')
+        else:
+            # 禁用自动同步
+            self.stop_auto_ntp_sync()
+            self.status_bar.showMessage('NTP时间同步已禁用')
+
+    def change_ntp_interval(self, interval_text):
+        """改变NTP同步间隔"""
+        interval_map = {
+            '15分钟': 900,
+            '30分钟': 1800,
+            '1小时': 3600,
+            '2小时': 7200,
+            '6小时': 21600,
+            '12小时': 43200,
+            '24小时': 86400
+        }
+        
+        self.ntp_sync_interval = interval_map.get(interval_text, 3600)
+        
+        if self.ntp_sync_enabled:
+            self.stop_auto_ntp_sync()
+            self.start_auto_ntp_sync()
+        
+        self.status_bar.showMessage(f'NTP同步间隔设置为: {interval_text}')
+
+    def start_auto_ntp_sync(self):
+        """开始自动NTP同步"""
+        if self.ntp_sync_timer:
+            self.ntp_sync_timer.stop()
+            self.ntp_sync_timer.start(self.ntp_sync_interval * 1000)
+        
+        # 立即执行一次同步
+        QTimer.singleShot(1000, self.manual_ntp_sync)
+
+    def stop_auto_ntp_sync(self):
+        """停止自动NTP同步"""
+        if self.ntp_sync_timer:
+            self.ntp_sync_timer.stop()
+
+    def manual_ntp_sync(self):
+        """手动执行NTP同步"""
+        try:
+            self.status_bar.showMessage('正在同步NTP时间...')
+            
+            # 在状态标签中显示同步中状态
+            self.ntp_status_label.setText('状态: 同步中...')
+            self.ntp_status_label.setStyleSheet("color: #FF9800; font-style: italic;")
+            
+            # 使用线程执行NTP同步，避免界面冻结
+            sync_thread = threading.Thread(target=self._perform_ntp_sync)
+            sync_thread.daemon = True
+            sync_thread.start()
+            
+        except Exception as e:
+            self.ntp_status_label.setText('状态: 同步失败')
+            self.ntp_status_label.setStyleSheet("color: red; font-style: italic;")
+            self.status_bar.showMessage(f'NTP同步失败: {e}')
+
+    def _perform_ntp_sync(self):
+        """执行NTP同步（在线程中运行）"""
+        try:
+            # 获取NTP时间
+            ntp_result = NTPTimeSync.get_formatted_ntp_time()
+            
+            # 使用信号在GUI线程中更新界面
+            if ntp_result:
+                self.ntp_sync_success.emit(ntp_result)
+            else:
+                self.ntp_sync_failed.emit("无法连接到任何NTP服务器")
+                
+        except Exception as e:
+            self.ntp_sync_failed.emit(str(e))
+
+    def on_ntp_sync_success(self, result):
+        """NTP同步成功处理"""
+        self.ntp_time_offset = result['offset']
+        self.ntp_last_sync_time = datetime.now()
+        
+        # 格式化显示信息
+        offset_str = f"{self.ntp_time_offset:.3f}"
+        if self.ntp_time_offset > 0:
+            offset_display = f"+{offset_str}"
+            color = "green"
+        elif self.ntp_time_offset < 0:
+            offset_display = offset_str
+            color = "red"
+        else:
+            offset_display = offset_str
+            color = "green"
+        
+        # 更新状态标签
+        sync_time_str = self.ntp_last_sync_time.strftime('%H:%M:%S')
+        self.ntp_status_label.setText(f'状态: 已同步 ({sync_time_str})')
+        self.ntp_status_label.setStyleSheet("color: green; font-style: italic;")
+        
+        # 更新偏移量标签
+        self.ntp_offset_label.setText(f'时间偏移: {offset_display} 秒')
+        self.ntp_offset_label.setStyleSheet(f"color: {color};")
+        
+        # 显示详细信息
+        details = f"""NTP同步成功！
+    服务器: {result['server']}
+    网络延迟: {result['latency']*1000:.1f} ms
+    时间偏移: {offset_display} 秒
+    本地时间: {result['formatted_local']}
+    NTP时间: {result['formatted_ntp']}"""
+        
+        self.status_bar.showMessage(f'NTP同步成功，时间偏移: {offset_display} 秒')
+        
+        # 如果偏移量过大，显示警告
+        if abs(self.ntp_time_offset) > 1.0:
+            QMessageBox.warning(self, '时间偏移警告', 
+                f"本地时间与NTP服务器时间偏移较大: {offset_display} 秒\n建议调整系统时间以保证计时准确性。")
+
+    def on_ntp_sync_failed(self, error_msg):
+        """NTP同步失败处理"""
+        self.ntp_status_label.setText('状态: 同步失败')
+        self.ntp_status_label.setStyleSheet("color: red; font-style: italic;")
+        self.ntp_offset_label.setText('时间偏移: 未知')
+        self.ntp_offset_label.setStyleSheet("color: gray;")
+        
+        self.status_bar.showMessage(f'NTP同步失败: {error_msg}')
+        QMessageBox.warning(self, 'NTP同步失败', f"无法同步NTP时间:\n{error_msg}")
+
+    def test_ntp_servers(self):
+        """测试所有NTP服务器"""
+        try:
+            self.status_bar.showMessage('正在测试NTP服务器...')
+            
+            # 在线程中执行测试
+            test_thread = threading.Thread(target=self._perform_server_test)
+            test_thread.daemon = True
+            test_thread.start()
+            
+        except Exception as e:
+            self.status_bar.showMessage(f'测试NTP服务器失败: {e}')
+
+    def _perform_server_test(self):
+        """执行服务器测试（在线程中运行）"""
+        try:
+            results = NTPTimeSync.test_all_servers()
+            self.server_test_complete.emit(results)
+        except Exception as e:
+            self.server_test_complete.emit([{'error': str(e)}])
+
+    def on_server_test_complete(self, results):
+        """服务器测试完成处理"""
+        if results and 'error' in results[0]:
+            QMessageBox.critical(self, '测试错误', f"测试NTP服务器时发生错误:\n{results[0]['error']}")
+            return
+        
+        # 创建结果显示对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle('NTP服务器测试结果')
+        dialog.setMinimumSize(500, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 创建表格显示结果
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(['服务器', '状态', '延迟(ms)', '偏移(ms)'])
+        table.setRowCount(len(results))
+        
+        available_count = 0
+        best_server = None
+        min_latency = float('inf')
+        
+        for i, result in enumerate(results):
+            table.setItem(i, 0, QTableWidgetItem(result['server']))
+            table.setItem(i, 1, QTableWidgetItem(result['status']))
+            
+            if result['status'] == '可用':
+                available_count += 1
+                latency_ms = result['latency'] * 1000 if result['latency'] else 0
+                offset_ms = result['offset'] * 1000 if result['offset'] else 0
+                
+                table.setItem(i, 2, QTableWidgetItem(f"{latency_ms:.1f}"))
+                table.setItem(i, 3, QTableWidgetItem(f"{offset_ms:.1f}"))
+                
+                # 查找最佳服务器
+                if result['latency'] and result['latency'] < min_latency:
+                    min_latency = result['latency']
+                    best_server = result['server']
+            else:
+                table.setItem(i, 2, QTableWidgetItem('-'))
+                table.setItem(i, 3, QTableWidgetItem('-'))
+        
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        
+        # 统计信息
+        stats_label = QLabel(f"可用服务器: {available_count}/{len(results)}")
+        if best_server:
+            stats_label.setText(stats_label.text() + f" | 最佳服务器: {best_server}")
+        
+        layout.addWidget(stats_label)
+        
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+        
+        dialog.exec_()
+        
+        self.status_bar.showMessage(f'NTP服务器测试完成，{available_count}个服务器可用')
+
+    def auto_ntp_sync(self):
+        """自动NTP同步"""
+        if self.ntp_sync_enabled:
+            self.manual_ntp_sync()
+
+    def get_corrected_time(self):
+        """获取经过NTP校正的时间"""
+        if self.ntp_sync_enabled and self.ntp_last_sync_time:
+            # 考虑时间漂移，可以加上自上次同步以来的时间
+            time_since_sync = (datetime.now() - self.ntp_last_sync_time).total_seconds()
+            return systime.time() + self.ntp_time_offset + time_since_sync
+        else:
+            return systime.time()
 
 def main():
     app = QApplication(sys.argv)
