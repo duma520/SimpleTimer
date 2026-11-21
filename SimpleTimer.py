@@ -6,35 +6,58 @@ import time
 import datetime
 import warnings
 import math
-import socket
-import struct
-import time as systime
-from datetime import datetime, timedelta
+
+# 抑制 Qt/FFmpeg 调试输出
+os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.multimedia.*.debug=false"
+os.environ["QT_LOGGING_CONF"] = ""
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, message="sipPyTypeDict")
 
 from pathlib import Path
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
-from PyQt5.QtMultimedia import QSound
 
-# 新增：导入Windows任务栏相关模块
+# PySide6 - QtWidgets
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QDialog,
+    QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QPushButton, QTabWidget, QStatusBar,
+    QGroupBox, QListWidget, QListWidgetItem,
+    QSpinBox, QLineEdit, QCheckBox, QSlider, QComboBox,
+    QProgressBar, QMenu,
+    QColorDialog, QFileDialog, QDialogButtonBox,
+    QFrame, QSystemTrayIcon, QStyle,
+    QMessageBox, QTextBrowser
+)
+
+# PySide6 - QtCore
+from PySide6.QtCore import (
+    Qt, QTimer, Signal, QThread, QUrl,
+    QPropertyAnimation, QByteArray, QEvent,
+    QPoint, QPointF, QRectF
+)
+
+# PySide6 - QtGui
+from PySide6.QtGui import (
+    QAction, QIcon, QColor, QFont, QFontMetrics,
+    QPixmap, QPainter, QPainterPath,
+    QPen, QBrush, QRadialGradient
+)
+
+# PySide6 - QtMultimedia
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+
+# 新增：导入Windows任务栏相关模块（PySide6无QtWinExtras，使用ctypes替代）
 try:
-    from PyQt5.QtWinExtras import QWinTaskbarButton, QWinTaskbarProgress
+    import ctypes
     HAS_WIN_EXTRAS = True
 except ImportError:
     HAS_WIN_EXTRAS = False
-    print("警告: PyQt5.QtWinExtras 不可用，Windows任务栏进度条功能将不可用")
-
-from PyQt5.QtGui import QIcon, QColor
+    print("警告: ctypes 不可用，Windows任务栏进度条功能将不可用")
 from datetime import datetime
 
 class ProjectInfo:
     """项目信息元数据（集中管理所有项目相关信息）"""
-    VERSION = "2.12.0"
-    BUILD_DATE = "2026-06-28"
-    from datetime import datetime
+    VERSION = "4.0"
+    BUILD_DATE = "2026-08-10"
     # BUILD_DATE = datetime.now().strftime("%Y-%m-%d")  # 修改为动态获取当前日期
     AUTHOR = "杜玛"
     LICENSE = "MIT"
@@ -54,24 +77,7 @@ class ProjectInfo:
 8. 状态颜色指示：不同状态（运行/暂停/停止）使用不同颜色显示
 9. 纯时间显示窗口：点击时间标签弹出全屏时间显示窗口，带防烧屏保护
 """
-    
-    # 新增：NTP服务器列表
-    NTP_SERVERS = [
-        # 新增：阿里云全套NTP服务器
-        'ntp1.aliyun.com',
-        'ntp2.aliyun.com',
-        'ntp3.aliyun.com',
-        'ntp4.aliyun.com',
-        'ntp5.aliyun.com',
-        'ntp6.aliyun.com',
-        'ntp7.aliyun.com',
-        'pool.ntp.org',            # NTP池项目
-        'cn.pool.ntp.org',         # 中国NTP池
-        'time.apple.com',         # 苹果时间服务器
-        'ntp.aliyun.com',         # 阿里云NTP服务器
-    ]
-    
-    # 在VERSION_HISTORY中添加新版本说明
+
     VERSION_HISTORY = {
         "1.0": "初始化版本 - 基础计时器和倒计时功能",
         "1.1": "修改最小化到托盘的默认情况",
@@ -90,7 +96,14 @@ class ProjectInfo:
         "2.10.0": "增加纯时间显示窗口功能，带防烧屏保护和自适应缩放",
         "2.10.1": "优化纯时间显示窗口的防烧屏保护功能，增加更多自定义选项",
         "2.11.0": "优化纯时间显示窗口的字体自适应缩放，提升用户体验",
-        "2.12.0": "增加NTP时间服务器校时功能，确保计时准确性"
+        "2.17.9": "新增NTP服务器，后期发现用途不大，下一版将移除",
+        "2.18.4": "增加标题栏和图标动态显示计时和倒计时情况",
+        "3.0.0": "升级到PySide6框架，采用多线程优化处理，提升性能和响应速度",
+        "3.1.0": "Nuitka编译支持（显式导入替代通配符导入），启动速度优化，修复自定义声音与测试声音Bug",
+        "3.2.0": "增加设置页面时钟显示格式选项（24小时制、12小时制、时分、毫秒、日期时间等），纯时钟窗口支持多种时钟显示方式",
+        "3.3.0": "增加时钟填充显示模式（自适应/满屏填充/等比缩放）；修复自定义声音不响（含测试声音）的问题",
+        "3.4.0": "设置页面改为多标签子页方式，避免设置项过多显示不完整；新增时钟填充模式；修复音频播放兼容性问题",
+        "4.0": "（无说明）"
     }
 
     HELP_TEXT = """
@@ -188,13 +201,12 @@ class ProjectInfo:
                 "自定义铃声 - 支持多种音频格式",
                 "状态颜色指示 - 运行/暂停/停止不同颜色",
                 "预设功能 - 常用时间预设和自定义预设",
-                "NTP时间服务器校时 - 确保计时准确性",
                 "纯时间显示窗口 - 全屏时间显示，带防烧屏保护"
             ],
             "system_requirements": [
                 "操作系统: Windows 7/8/10/11, Linux, macOS",
-                "Python: 3.6 或更高版本",
-                "PyQt5: 5.15 或更高版本",
+                "Python: 3.9 或更高版本",
+                "PySide6: 6.5 或更高版本",
                 "音频支持: 需要系统音频编解码器支持"
             ],
             "version_history": cls.VERSION_HISTORY,
@@ -204,8 +216,6 @@ class ProjectInfo:
     @classmethod
     def show_about_dialog(cls, parent=None):
         """显示关于对话框"""
-        from PyQt5.QtWidgets import QMessageBox, QTextBrowser
-        from PyQt5.QtCore import Qt
         
         about_text = f"""
 {cls.get_header()}
@@ -245,175 +255,19 @@ class ProjectInfo:
         
         msg_box.layout().addWidget(text_browser, 1, 0, 1, msg_box.layout().columnCount())
         msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec_()
-
-class NTPTimeSync:
-    """NTP时间同步工具类"""
-    
-    NTP_PORT = 123
-    TIMEOUT = 5  # 连接超时时间（秒）
-    
-    @staticmethod
-    def ntp_request(server='time.windows.com', port=123):
-        """向NTP服务器请求时间"""
-        try:
-            # 创建UDP套接字
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(NTPTimeSync.TIMEOUT)
-            
-            # 连接服务器
-            server_addr = (server, port)
-            
-            # 构建NTP请求数据包
-            data = b'\x1b' + 47 * b'\0'
-            
-            # 发送请求
-            sock.sendto(data, server_addr)
-            
-            # 接收响应
-            data, _ = sock.recvfrom(1024)
-            
-            # 关闭套接字
-            sock.close()
-            
-            if len(data) >= 48:
-                # 解析NTP响应
-                # 解析传输时间戳（第40-47字节）
-                transmit_timestamp = data[40:48]
-                
-                # 将字节转换为整数
-                int_part = struct.unpack('!I', transmit_timestamp[:4])[0]
-                frac_part = struct.unpack('!I', transmit_timestamp[4:])[0]
-                
-                # 转换为秒数（自1900年以来的秒数）
-                ntp_time = int_part + frac_part / 2**32 - 2208988800
-                
-                return ntp_time
-            else:
-                return None
-                
-        except socket.timeout:
-            print(f"连接NTP服务器 {server} 超时")
-            return None
-        except socket.gaierror:
-            print(f"无法解析NTP服务器地址: {server}")
-            return None
-        except Exception as e:
-            print(f"NTP请求失败 {server}: {e}")
-            return None
-    
-    @staticmethod
-    def get_ntp_time(server_list=None):
-        """从多个NTP服务器获取时间，选择最快响应的"""
-        if server_list is None:
-            server_list = ProjectInfo.NTP_SERVERS
-        
-        best_time = None
-        best_server = None
-        min_latency = float('inf')
-        
-        for server in server_list:
-            try:
-                start_time = systime.time()
-                ntp_time = NTPTimeSync.ntp_request(server)
-                end_time = systime.time()
-                
-                if ntp_time is not None:
-                    latency = end_time - start_time
-                    
-                    # 计算网络延迟补偿后的时间
-                    corrected_time = ntp_time + latency / 2
-                    
-                    # 如果这是最快的响应或第一个有效响应
-                    if latency < min_latency or best_time is None:
-                        min_latency = latency
-                        best_time = corrected_time
-                        best_server = server
-                        
-            except Exception as e:
-                print(f"从 {server} 获取时间失败: {e}")
-                continue
-        
-        if best_time is not None:
-            return {
-                'timestamp': best_time,
-                'server': best_server,
-                'latency': min_latency,
-                'local_time': systime.time(),
-                'offset': best_time - systime.time()
-            }
-        else:
-            return None
-    
-    @staticmethod
-    def get_formatted_ntp_time(server_list=None):
-        """获取格式化的NTP时间"""
-        result = NTPTimeSync.get_ntp_time(server_list)
-        
-        if result:
-            # 转换为datetime对象
-            ntp_datetime = datetime.fromtimestamp(result['timestamp'])
-            local_datetime = datetime.fromtimestamp(result['local_time'])
-            
-            return {
-                'ntp_time': ntp_datetime,
-                'local_time': local_datetime,
-                'server': result['server'],
-                'latency': result['latency'],
-                'offset': result['offset'],
-                'formatted_ntp': ntp_datetime.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
-                'formatted_local': local_datetime.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            }
-        else:
-            return None
-    
-    @staticmethod
-    def test_all_servers():
-        """测试所有NTP服务器的响应"""
-        results = []
-        
-        for server in ProjectInfo.NTP_SERVERS:
-            try:
-                start = systime.time()
-                ntp_time = NTPTimeSync.ntp_request(server)
-                end = systime.time()
-                
-                if ntp_time:
-                    latency = end - start
-                    offset = ntp_time - end
-                    results.append({
-                        'server': server,
-                        'latency': latency,
-                        'offset': offset,
-                        'status': '可用'
-                    })
-                else:
-                    results.append({
-                        'server': server,
-                        'latency': None,
-                        'offset': None,
-                        'status': '不可用'
-                    })
-                    
-            except Exception as e:
-                results.append({
-                    'server': server,
-                    'latency': None,
-                    'offset': None,
-                    'status': f'错误: {str(e)}'
-                })
-        
-        return results
+        msg_box.exec()
 
 # 新增：纯时间显示窗口类
 class TimeDisplayWindow(QMainWindow):
     """纯时间显示窗口，带防烧屏保护和自适应缩放"""
     
-    def __init__(self, parent=None, timer_type='timer', initial_time='00:00:00'):
+    def __init__(self, parent=None, timer_type='timer', initial_time='00:00:00', clock_format='24h', fill_mode='auto_fit'):
         super().__init__(parent)
         self.parent_timer = parent
         self.timer_type = timer_type  # 'timer' 或 'countdown'
         self.current_time = initial_time
+        self.clock_format = clock_format  # 时钟显示格式
+        self.fill_mode = fill_mode  # 时钟填充模式: auto_fit/full_fill/proportional
         
         # 防烧屏相关设置
         self.burn_in_protection_enabled = True
@@ -499,14 +353,7 @@ class TimeDisplayWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #888888; font-size: 12px; margin-top: 10px;")
         self.status_label.hide()  # 默认隐藏状态标签
         main_layout.addWidget(self.status_label)
-
-        # 在状态标签中显示NTP状态
-        if self.parent_timer and hasattr(self.parent_timer, 'ntp_sync_enabled') and self.parent_timer.ntp_sync_enabled:
-            ntp_status = "NTP已同步" if self.parent_timer.ntp_last_sync_time else "NTP同步中"
-            self.status_label.setText(f"点击右键显示菜单 | 防烧屏保护已启用 | {ntp_status}")
-        else:
-            self.status_label.setText("点击右键显示菜单 | 防烧屏保护已启用")
-
+        
         # 设置初始窗口大小
         self.resize(800, 400)
         
@@ -525,13 +372,76 @@ class TimeDisplayWindow(QMainWindow):
     def update_time(self, time_str, progress=0):
         """更新时间显示"""
         self.current_time = time_str
-        self.time_label.setText(time_str)
+        # 根据时钟格式转换时间显示
+        formatted_time = self._apply_clock_format(time_str)
+        self.time_label.setText(formatted_time)
         
         # 更新时间后重新调整字体大小
         self.adjust_font_size()
         
         # 更新最后活动时间
         self.last_activity_time = time.time()
+
+    def set_clock_format(self, format_key):
+        """设置时钟显示格式"""
+        self.clock_format = format_key
+        # 同步到主窗口设置
+        if self.parent_timer:
+            self.parent_timer.settings_manager.update_setting('time_display_clock_format', format_key)
+            # 同步更新设置页面的下拉框
+            if hasattr(self.parent_timer, 'clock_format_combo'):
+                idx = self.parent_timer.clock_format_combo.findData(format_key)
+                if idx >= 0:
+                    self.parent_timer.clock_format_combo.blockSignals(True)
+                    self.parent_timer.clock_format_combo.setCurrentIndex(idx)
+                    self.parent_timer.clock_format_combo.blockSignals(False)
+        # 立即刷新当前时间显示
+        if self.current_time:
+            formatted_time = self._apply_clock_format(self.current_time)
+            self.time_label.setText(formatted_time)
+            self.adjust_font_size()
+
+    def _apply_clock_format(self, time_str):
+        """根据当前时钟格式转换时间字符串显示"""
+        from datetime import datetime
+        
+        # 解析输入的时间字符串 (HH:MM:SS 格式)
+        parts = time_str.split(':')
+        if len(parts) != 3:
+            return time_str
+        
+        try:
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            return time_str
+        
+        now = datetime.now()
+        
+        if self.clock_format == '24h':
+            return f'{h:02d}:{m:02d}:{s:02d}'
+        elif self.clock_format == '12h':
+            # 将小时转换为12小时制
+            hour_12 = h % 12
+            if hour_12 == 0:
+                hour_12 = 12
+            ampm = 'AM' if h < 12 else 'PM'
+            return f'{hour_12:02d}:{m:02d}:{s:02d} {ampm}'
+        elif self.clock_format == 'hm':
+            return f'{h:02d}:{m:02d}'
+        elif self.clock_format == '12h_hm':
+            hour_12 = h % 12
+            if hour_12 == 0:
+                hour_12 = 12
+            ampm = 'AM' if h < 12 else 'PM'
+            return f'{hour_12:02d}:{m:02d} {ampm}'
+        elif self.clock_format == 'ms':
+            # 从当前系统时间获取毫秒
+            ms = now.microsecond // 1000
+            return f'{h:02d}:{m:02d}:{s:02d}.{ms:03d}'
+        elif self.clock_format == 'datetime':
+            return now.strftime('%Y-%m-%d ') + f'{h:02d}:{m:02d}:{s:02d}'
+        else:
+            return f'{h:02d}:{m:02d}:{s:02d}'
         
     def update_time_style(self, state):
         """根据状态更新时间显示样式"""
@@ -550,66 +460,108 @@ class TimeDisplayWindow(QMainWindow):
         self.adjust_font_size()
         
     def adjust_font_size(self):
-        """根据窗口大小调整字体大小，让字体填满窗口"""
-        # 获取窗口和标签的尺寸
+        """根据窗口大小调整字体大小，让字体填满窗口（支持多种填充模式）"""
         window_width = self.width()
         window_height = self.height()
-        
-        # 计算基于文本长度和窗口尺寸的字体大小
+
+        if window_width <= 0 or window_height <= 0:
+            return
+
         text = self.time_label.text()
-        text_length = len(text.replace(':', ''))
-        
-        # 计算方法1：基于宽度（主要限制因素）
-        # 假设每个字符的平均宽度是字体大小的一半
-        # 我们想要文本占据窗口宽度的80%
-        target_width = window_width * 0.8
-        font_size_by_width = int(target_width / (text_length * 0.6))
-        
-        # 计算方法2：基于高度
-        # 我们想要文本占据窗口高度的70%
-        target_height = window_height * 0.7
-        font_size_by_height = int(target_height * 0.9)  # 字体大小约为高度的0.9倍
-        
-        # 取两个计算结果的较小值，确保文本不会超出窗口
-        new_font_size = min(font_size_by_width, font_size_by_height)
-        
+        text_length = max(len(text.replace(':', '').replace(' ', '').replace('.', '').replace('-', '')), 1)
+
+        # 根据填充模式计算字号
+        if self.fill_mode == 'full_fill':
+            # 满屏填充：尽可能大地填满窗口
+            target_width_ratio = 0.98
+            target_height_ratio = 0.98
+            font_size_by_width = int(window_width * target_width_ratio / (text_length * 0.6))
+            font_size_by_height = int(window_height * target_height_ratio * 0.95)
+            new_font_size = min(font_size_by_width, font_size_by_height)
+        elif self.fill_mode == 'proportional':
+            # 等比缩放：保持宽高比，始终完整显示
+            target_width_ratio = 0.85
+            target_height_ratio = 0.85
+            font_size_by_width = int(window_width * target_width_ratio / (text_length * 0.6))
+            font_size_by_height = int(window_height * target_height_ratio * 0.9)
+            new_font_size = min(font_size_by_width, font_size_by_height)
+            # 等比模式下确保高度方向也充分填充
+            test_font = QFont("Arial", new_font_size, QFont.Bold)
+            fm = QFontMetrics(test_font)
+            while fm.height() < window_height * 0.4 and new_font_size < 500:
+                new_font_size += 5
+                test_font = QFont("Arial", new_font_size, QFont.Bold)
+                fm = QFontMetrics(test_font)
+                if fm.horizontalAdvance(text) > window_width * target_width_ratio:
+                    new_font_size -= 5
+                    break
+        else:
+            # auto_fit: 自适应窗口（默认）
+            target_width = window_width * 0.8
+            target_height = window_height * 0.7
+            font_size_by_width = int(target_width / (text_length * 0.6))
+            font_size_by_height = int(target_height * 0.9)
+            new_font_size = min(font_size_by_width, font_size_by_height)
+
         # 设置最小和最大字体大小限制
         min_font_size = 20
-        max_font_size = 500  # 增加最大字体大小限制
-        
+        max_font_size = 500
+
         if new_font_size < min_font_size:
             new_font_size = min_font_size
         elif new_font_size > max_font_size:
             new_font_size = max_font_size
-        
+
         # 如果字体大小有显著变化才更新
         if abs(new_font_size - self.font_size) > 5 or new_font_size != self.font_size:
             self.font_size = new_font_size
-            
+
             # 应用新字体
             font = QFont("Arial", self.font_size, QFont.Bold)
-            
-            # 设置字体平滑和抗锯齿
             font.setHintingPreference(QFont.PreferFullHinting)
-            
+
             # 确保字体不会太大导致布局问题
             font_metrics = QFontMetrics(font)
-            text_width = font_metrics.width(text)
+            text_width = font_metrics.horizontalAdvance(text)
             text_height = font_metrics.height()
-            
-            # 如果文本太大，逐步减小字体直到合适
-            while (text_width > window_width * 0.9 or text_height > window_height * 0.9) and self.font_size > min_font_size:
+
+            # 根据填充模式决定安全边际
+            if self.fill_mode == 'full_fill':
+                safe_width_ratio = 0.98
+                safe_height_ratio = 0.98
+            elif self.fill_mode == 'proportional':
+                safe_width_ratio = 0.90
+                safe_height_ratio = 0.90
+            else:
+                safe_width_ratio = 0.90
+                safe_height_ratio = 0.90
+
+            while (text_width > window_width * safe_width_ratio or
+                   text_height > window_height * safe_height_ratio) and self.font_size > min_font_size:
                 self.font_size -= 1
                 font = QFont("Arial", self.font_size, QFont.Bold)
                 font_metrics = QFontMetrics(font)
-                text_width = font_metrics.width(text)
+                text_width = font_metrics.horizontalAdvance(text)
                 text_height = font_metrics.height()
-            
+
             self.time_label.setFont(font)
-            
-            # 强制更新布局
             self.time_label.adjustSize()
             self.update()
+
+    def set_fill_mode(self, fill_mode):
+        """设置时钟填充显示模式"""
+        self.fill_mode = fill_mode
+        # 同步到主窗口设置
+        if self.parent_timer:
+            self.parent_timer.settings_manager.update_setting('time_display_fill_mode', fill_mode)
+            if hasattr(self.parent_timer, 'clock_fill_mode_combo'):
+                idx = self.parent_timer.clock_fill_mode_combo.findData(fill_mode)
+                if idx >= 0:
+                    self.parent_timer.clock_fill_mode_combo.blockSignals(True)
+                    self.parent_timer.clock_fill_mode_combo.setCurrentIndex(idx)
+                    self.parent_timer.clock_fill_mode_combo.blockSignals(False)
+        # 立即刷新显示
+        self.adjust_font_size()
         
     def show_context_menu(self, position):
         """显示上下文菜单"""
@@ -660,6 +612,100 @@ class TimeDisplayWindow(QMainWindow):
         
         menu.addSeparator()
         
+        # 时钟显示格式选项
+        clock_format_menu = QMenu("时钟显示格式")
+        clock_format_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+            QMenu::item:checked {
+                font-weight: bold;
+            }
+        """)
+        
+        format_24h = QAction("24小时制 (HH:MM:SS)", self)
+        format_24h.setCheckable(True)
+        format_24h.setChecked(self.clock_format == '24h')
+        format_24h.triggered.connect(lambda: self.set_clock_format('24h'))
+        clock_format_menu.addAction(format_24h)
+        
+        format_12h = QAction("12小时制 (HH:MM:SS AM/PM)", self)
+        format_12h.setCheckable(True)
+        format_12h.setChecked(self.clock_format == '12h')
+        format_12h.triggered.connect(lambda: self.set_clock_format('12h'))
+        clock_format_menu.addAction(format_12h)
+        
+        format_hm = QAction("仅显示时分 (HH:MM)", self)
+        format_hm.setCheckable(True)
+        format_hm.setChecked(self.clock_format == 'hm')
+        format_hm.triggered.connect(lambda: self.set_clock_format('hm'))
+        clock_format_menu.addAction(format_hm)
+        
+        format_12h_hm = QAction("12小时制时分 (HH:MM AM/PM)", self)
+        format_12h_hm.setCheckable(True)
+        format_12h_hm.setChecked(self.clock_format == '12h_hm')
+        format_12h_hm.triggered.connect(lambda: self.set_clock_format('12h_hm'))
+        clock_format_menu.addAction(format_12h_hm)
+        
+        format_ms = QAction("含毫秒 (HH:MM:SS.mmm)", self)
+        format_ms.setCheckable(True)
+        format_ms.setChecked(self.clock_format == 'ms')
+        format_ms.triggered.connect(lambda: self.set_clock_format('ms'))
+        clock_format_menu.addAction(format_ms)
+        
+        format_datetime = QAction("日期+时间 (YYYY-MM-DD HH:MM:SS)", self)
+        format_datetime.setCheckable(True)
+        format_datetime.setChecked(self.clock_format == 'datetime')
+        format_datetime.triggered.connect(lambda: self.set_clock_format('datetime'))
+        clock_format_menu.addAction(format_datetime)
+        
+        menu.addMenu(clock_format_menu)
+
+        # 填充显示模式选项
+        fill_mode_menu = QMenu("填充显示模式")
+        fill_mode_menu.setStyleSheet("""
+            QMenu {
+                background-color: white;
+                color: black;
+                border: 1px solid #ccc;
+            }
+            QMenu::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+            QMenu::item:checked {
+                font-weight: bold;
+            }
+        """)
+
+        fill_auto = QAction("自适应窗口（按比例缩放）", self)
+        fill_auto.setCheckable(True)
+        fill_auto.setChecked(self.fill_mode == 'auto_fit')
+        fill_auto.triggered.connect(lambda: self.set_fill_mode('auto_fit'))
+        fill_mode_menu.addAction(fill_auto)
+
+        fill_full = QAction("满屏填充（最大化填满）", self)
+        fill_full.setCheckable(True)
+        fill_full.setChecked(self.fill_mode == 'full_fill')
+        fill_full.triggered.connect(lambda: self.set_fill_mode('full_fill'))
+        fill_mode_menu.addAction(fill_full)
+
+        fill_prop = QAction("等比缩放（保持宽高比）", self)
+        fill_prop.setCheckable(True)
+        fill_prop.setChecked(self.fill_mode == 'proportional')
+        fill_prop.triggered.connect(lambda: self.set_fill_mode('proportional'))
+        fill_mode_menu.addAction(fill_prop)
+
+        menu.addMenu(fill_mode_menu)
+
+        menu.addSeparator()
+
         # 窗口控制选项
         if not self.is_fullscreen:
             fullscreen_action = QAction("全屏显示", self)
@@ -758,7 +804,7 @@ class TimeDisplayWindow(QMainWindow):
         menu.addAction(close_action)
         
         # 显示菜单
-        menu.exec_(self.mapToGlobal(position))
+        menu.exec(self.mapToGlobal(position))
         
     def set_display_mode(self, mode):
         """设置显示模式"""
@@ -980,70 +1026,50 @@ class MacaronColors_12:
 
 class TimerThread(QThread):
     """计时器线程"""
-    update_signal = pyqtSignal(str, int)  # 更新时间信号
-    alarm_signal = pyqtSignal()  # 闹钟信号
+    update_signal = Signal(str, int)  # 更新时间信号
+    alarm_signal = Signal()  # 闹钟信号
     
-    def __init__(self, duration_seconds, is_countdown=False, use_ntp=False):
+    def __init__(self, duration_seconds, is_countdown=False):
         super().__init__()
         self.duration = duration_seconds
         self.is_countdown = is_countdown
-        self.use_ntp = use_ntp
         self.is_running = True
         self.is_paused = False
         self.pause_lock = threading.Lock()
         self.elapsed = 0
-        self.start_time = None
         
-    def get_current_time(self):
-        """获取当前时间（如果启用NTP则使用校正后的时间）"""
-        if self.use_ntp and hasattr(self, 'parent_window'):
-            return self.parent_window.get_corrected_time()
-        else:
-            return systime.time()
-    
     def run(self):
         if self.is_countdown:
             remaining = self.duration
-            start_time = self.get_current_time()
-            
             while remaining > 0 and self.is_running:
                 if not self.is_paused:
-                    # 使用更准确的时间计算
-                    current_time = self.get_current_time()
-                    elapsed_since_start = current_time - start_time
-                    remaining = max(0, self.duration - elapsed_since_start)
-                    
-                    mins, secs = divmod(int(remaining), 60)
+                    mins, secs = divmod(remaining, 60)
                     hours, mins = divmod(mins, 60)
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
                     
-                    # 计算进度
+                    # 修复：计算剩余时间的百分比，从100%递减到0%
                     if self.duration > 0:
                         progress = int((self.duration - remaining) * 100 / self.duration)
+                        # 确保进度不超过100%
                         progress = min(progress, 100)
                     else:
                         progress = 0
                     
                     self.update_signal.emit(time_str, progress)
-                    time.sleep(0.1)  # 更频繁的更新以提高准确性
+                    remaining -= 1
+                    time.sleep(1)
                 else:
-                    # 暂停时更新开始时间
-                    start_time = self.get_current_time() - (self.duration - remaining)
                     time.sleep(0.1)
                     
-            if remaining <= 0:
+            if remaining == 0:
+                # 时间到，发送100%的进度
                 self.update_signal.emit("00:00:00", 100)
                 self.alarm_signal.emit()
         else:
             self.elapsed = 0
-            start_time = self.get_current_time()
-            
             while self.is_running:
                 if not self.is_paused:
-                    current_time = self.get_current_time()
-                    self.elapsed = current_time - start_time
-                    
-                    mins, secs = divmod(int(self.elapsed), 60)
+                    mins, secs = divmod(self.elapsed, 60)
                     hours, mins = divmod(mins, 60)
                     time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
                     
@@ -1052,13 +1078,12 @@ class TimerThread(QThread):
                         progress = min(self.elapsed * 100 // max(self.duration, 1), 100)
                     else:
                         # 无限制计时器，每60秒一个周期
-                        progress = int(self.elapsed) % 60 * 100 // 60
+                        progress = self.elapsed % 60 * 100 // 60
                     
                     self.update_signal.emit(time_str, progress)
-                    time.sleep(0.1)  # 更频繁的更新以提高准确性
+                    self.elapsed += 1
+                    time.sleep(1)
                 else:
-                    # 暂停时更新开始时间
-                    start_time = self.get_current_time() - self.elapsed
                     time.sleep(0.1)
     
     def pause(self):
@@ -1106,13 +1131,15 @@ class SettingsManager:
             "time_display_burnin_protection": True,
             "time_display_pixel_shift_interval": 300,
             "time_display_color_theme": "auto",
-            # 新增：NTP校时设置
-            "ntp_sync_enabled": False,
-            "ntp_sync_interval": 3600,  # 默认1小时
-            "ntp_last_sync_time": None,
-            "ntp_time_offset": 0.0,
+            "time_display_clock_format": "24h",  # 时钟显示格式: 24h/12h/hm/12h_hm/ms/datetime
+            "time_display_fill_mode": "auto_fit"  # 时钟填充模式: auto_fit/full_fill/proportional
         }
         self.settings = self.load_settings()
+        self._save_worker = None
+        self._dirty = False
+        self._save_timer = QTimer()
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._do_save)
     
     def load_settings(self):
         try:
@@ -1128,6 +1155,16 @@ class SettingsManager:
         return self.default_settings.copy()
     
     def save_settings(self):
+        """标记设置需要保存（延迟批量写入，避免频繁IO）"""
+        self._dirty = True
+        if not self._save_timer.isActive():
+            self._save_timer.start(500)  # 500ms防抖
+    
+    def _do_save(self):
+        """实际执行保存操作"""
+        if not self._dirty:
+            return
+        self._dirty = False
         try:
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, ensure_ascii=False, indent=2)
@@ -1161,11 +1198,6 @@ class CustomProgressBar(QProgressBar):
         """)
 
 class TimerWindow(QMainWindow):
-    # 在类定义中添加信号
-    ntp_sync_success = pyqtSignal(dict)
-    ntp_sync_failed = pyqtSignal(str)
-    server_test_complete = pyqtSignal(list)
-
     def __init__(self):
         super().__init__()
         self.settings_manager = SettingsManager()
@@ -1174,14 +1206,6 @@ class TimerWindow(QMainWindow):
         self.current_timer_type = None
         self.current_duration = 0
         
-        # 新增：NTP校时相关属性
-        self.ntp_time_offset = 0.0  # NTP时间与本地时间的偏移量（秒）
-        self.ntp_sync_enabled = False  # 是否启用NTP同步
-        self.ntp_last_sync_time = None  # 上次同步时间
-        self.ntp_sync_interval = 3600  # 同步间隔（秒，默认1小时）
-        self.ntp_sync_timer = None  # 自动同步定时器
-        
-
         # 新增：纯时间显示窗口
         self.time_display_window = None
 
@@ -1191,20 +1215,19 @@ class TimerWindow(QMainWindow):
         # 新增：倒计时状态变量
         self.countdown_state = 'stopped'  # 'stopped', 'running', 'paused'
 
-        # 新增：倒计时状态变量
-        self.countdown_state = 'stopped'  # 'stopped', 'running', 'paused'
-
         # 新增：计时器状态变量
         self.timer_state = 'stopped'  # 'stopped', 'running', 'paused'
     
-        # 新增：音频播放器
+        # 新增：音频播放器（延迟初始化，避免阻塞启动）
         self.media_player = None
-        self.init_audio_player()
+        self.audio_output = None
+        # 延迟到事件循环启动后异步初始化音频
+        QTimer.singleShot(200, self.init_audio_player_async)
                 
         # 初始化属性，避免AttributeError
         self.tray_icon = None
-        self.taskbar_button = None
-        self.taskbar_progress = None
+        self._taskbar_available = False
+        self._taskbar_hwnd = None
         
         # 新增：动画相关属性
         self.shake_animation = None
@@ -1212,27 +1235,25 @@ class TimerWindow(QMainWindow):
         self.flash_count = 0
         self.taskbar_timer = None
         self.original_style = ""
+        self.original_window_title = ""  # 保存原标题
+        self.is_showing_time_in_title = False  # 是否正在标题栏显示时间
+        self.title_update_timer = None  # 标题更新时间定时器
+        
+        # 新增：图标管理相关属性
+        self.original_window_icon = None  # 保存原图标
+        self.icon_update_timer = None  # 图标更新定时器
+        self.dynamic_icon_frames = []  # 动态图标帧列表
+        self.current_icon_frame = 0  # 当前图标帧索引
+        self.total_countdown_seconds = 0  # 倒计时总秒数（用于图标进度）
         
         self.init_ui()
         self.load_settings()
         
-        # 初始化任务栏进度条
-        self.init_taskbar_progress()
-
-        
-        # 连接NTP相关信号
-        self.ntp_sync_success.connect(self.on_ntp_sync_success)
-        self.ntp_sync_failed.connect(self.on_ntp_sync_failed)
-        self.server_test_complete.connect(self.on_server_test_complete)
-
-        # 新增：初始化NTP同步定时器
-        self.init_ntp_sync()
-        
-    def init_ntp_sync(self):
-        """初始化NTP同步"""
-        self.ntp_sync_timer = QTimer(self)
-        self.ntp_sync_timer.timeout.connect(self.auto_ntp_sync)
-        
+        # 初始化任务栏进度条（延后执行，不阻塞窗口显示）
+        QTimer.singleShot(100, self.init_taskbar_progress)
+        # 音频播放器延迟初始化
+        QTimer.singleShot(500, self.init_audio_player_async)
+    
     def init_ui(self):
         """初始化界面"""
         # self.setWindowTitle('多功能计时器')
@@ -1545,301 +1566,252 @@ class TimerWindow(QMainWindow):
         self.tab_widget.addTab(preset_tab, "⭐ 预设")
         
     def create_settings_tab(self):
-        """创建设置标签页"""
+        """创建设置标签页（使用多标签子页避免显示不完整）"""
         settings_tab = QWidget()
-        layout = QVBoxLayout(settings_tab)
-        
-        # 声音设置
+        main_layout = QVBoxLayout(settings_tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 设置子标签页
+        self.settings_sub_tabs = QTabWidget()
+        self.settings_sub_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                background: #f0f0f0;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border: 1px solid #ccc;
+                border-bottom: none;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                font-weight: bold;
+            }
+        """)
+
+        # ---- 子标签1：声音设置 ----
+        self._create_sound_settings_subtab()
+
+        # ---- 子标签2：提醒设置 ----
+        self._create_alarm_settings_subtab()
+
+        # ---- 子标签3：窗口设置 ----
+        self._create_window_settings_subtab()
+
+        # ---- 子标签4：时钟显示设置 ----
+        self._create_clock_display_settings_subtab()
+
+        # ---- 子标签5：重置设置 ----
+        self._create_reset_settings_subtab()
+
+        main_layout.addWidget(self.settings_sub_tabs)
+        self.tab_widget.addTab(settings_tab, "⚙️ 设置")
+
+        # 创建关于标签页
+        self.create_about_tab()
+
+    def _create_sound_settings_subtab(self):
+        """创建声音设置子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         sound_group = QGroupBox('声音设置')
         sound_layout = QVBoxLayout()
-        
-        # 静音选项
+
         self.mute_checkbox = QCheckBox('静音')
         self.mute_checkbox.stateChanged.connect(self.toggle_mute)
         sound_layout.addWidget(self.mute_checkbox)
-        
-        # 音量控制
+
         volume_layout = QHBoxLayout()
         volume_layout.addWidget(QLabel('音量:'))
-        
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.valueChanged.connect(self.change_volume)
         volume_layout.addWidget(self.volume_slider)
-        
         self.volume_label = QLabel('100%')
         volume_layout.addWidget(self.volume_label)
-        
         sound_layout.addLayout(volume_layout)
-        
-        # 铃声选择
+
         sound_layout.addWidget(QLabel('选择铃声:'))
-        
         self.sound_combo = QComboBox()
         self.sound_combo.addItem('默认铃声')
         self.sound_combo.addItem('自定义铃声...')
-        self.sound_combo.currentTextChanged.connect(self.change_sound)
+        self.sound_combo.activated.connect(self._on_sound_activated)
         sound_layout.addWidget(self.sound_combo)
-        
-        # 测试声音按钮
+
+        # 当前铃声文件路径显示
+        self.sound_file_path_label = QLabel('')
+        self.sound_file_path_label.setStyleSheet(
+            "color: #2196F3; font-size: 12px; padding: 5px; "
+            "background-color: #f5f5f5; border-radius: 3px;"
+        )
+        self.sound_file_path_label.setWordWrap(True)
+        self.sound_file_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        sound_layout.addWidget(self.sound_file_path_label)
+
         test_sound_btn = QPushButton('测试声音')
         test_sound_btn.clicked.connect(self.test_sound)
         sound_layout.addWidget(test_sound_btn)
-        
+
         sound_group.setLayout(sound_layout)
         layout.addWidget(sound_group)
-        
-        # 新增：提醒方式设置
+        layout.addStretch()
+        self.settings_sub_tabs.addTab(tab, "🔊 声音")
+
+    def _create_alarm_settings_subtab(self):
+        """创建提醒方式设置子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         alarm_group = QGroupBox('提醒方式设置')
         alarm_layout = QVBoxLayout()
-        
+
         self.window_shake_checkbox = QCheckBox('窗口抖动提醒')
         self.window_shake_checkbox.stateChanged.connect(self.toggle_window_shake)
         alarm_layout.addWidget(self.window_shake_checkbox)
-        
+
         self.window_flash_checkbox = QCheckBox('窗口闪烁提醒')
         self.window_flash_checkbox.stateChanged.connect(self.toggle_window_flash)
         alarm_layout.addWidget(self.window_flash_checkbox)
-        
+
         self.taskbar_flash_checkbox = QCheckBox('任务栏闪烁提醒')
         self.taskbar_flash_checkbox.stateChanged.connect(self.toggle_taskbar_flash)
         self.taskbar_flash_checkbox.setEnabled(sys.platform == 'win32')
         if sys.platform != 'win32':
             self.taskbar_flash_checkbox.setToolTip('仅Windows系统可用')
         alarm_layout.addWidget(self.taskbar_flash_checkbox)
-        
+
         self.alert_dialog_checkbox = QCheckBox('显示醒目提醒对话框')
         self.alert_dialog_checkbox.stateChanged.connect(self.toggle_alert_dialog)
         alarm_layout.addWidget(self.alert_dialog_checkbox)
-        
-        # 测试提醒按钮
+
         test_alarm_btn = QPushButton('测试提醒效果')
         test_alarm_btn.clicked.connect(self.test_alarm_effects)
         alarm_layout.addWidget(test_alarm_btn)
-        
+
         alarm_group.setLayout(alarm_layout)
         layout.addWidget(alarm_group)
-        
-        # 窗口设置
+        layout.addStretch()
+        self.settings_sub_tabs.addTab(tab, "🔔 提醒")
+
+    def _create_window_settings_subtab(self):
+        """创建窗口设置子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         window_group = QGroupBox('窗口设置')
         window_layout = QVBoxLayout()
-        
+
         self.always_on_top_checkbox = QCheckBox('窗口置顶')
         self.always_on_top_checkbox.stateChanged.connect(self.toggle_always_on_top)
         window_layout.addWidget(self.always_on_top_checkbox)
-    
-        # 新增：最小化到托盘选项
+
         self.minimize_to_tray_checkbox = QCheckBox('最小化到托盘')
         self.minimize_to_tray_checkbox.stateChanged.connect(self.toggle_minimize_to_tray)
         window_layout.addWidget(self.minimize_to_tray_checkbox)
-    
+
         window_group.setLayout(window_layout)
         layout.addWidget(window_group)
+        layout.addStretch()
+        self.settings_sub_tabs.addTab(tab, "🪟 窗口")
 
-        # 重置设置
+    def _create_clock_display_settings_subtab(self):
+        """创建时钟显示设置子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
+        clock_display_group = QGroupBox('纯时钟显示设置')
+        clock_display_layout = QVBoxLayout()
+
+        # 时钟显示格式
+        clock_format_layout = QHBoxLayout()
+        clock_format_layout.addWidget(QLabel('时钟显示格式:'))
+        self.clock_format_combo = QComboBox()
+        self.clock_format_combo.addItem('24小时制 (HH:MM:SS)', '24h')
+        self.clock_format_combo.addItem('12小时制 (HH:MM:SS AM/PM)', '12h')
+        self.clock_format_combo.addItem('仅显示时分 (HH:MM)', 'hm')
+        self.clock_format_combo.addItem('12小时制时分 (HH:MM AM/PM)', '12h_hm')
+        self.clock_format_combo.addItem('含毫秒 (HH:MM:SS.mmm)', 'ms')
+        self.clock_format_combo.addItem('日期+时间 (YYYY-MM-DD HH:MM:SS)', 'datetime')
+        self.clock_format_combo.currentIndexChanged.connect(self.change_clock_format)
+        clock_format_layout.addWidget(self.clock_format_combo)
+        clock_display_layout.addLayout(clock_format_layout)
+
+        # 格式预览
+        self.clock_format_preview = QLabel('格式预览: --')
+        self.clock_format_preview.setStyleSheet("color: #666; font-size: 13px; padding: 5px;")
+        clock_display_layout.addWidget(self.clock_format_preview)
+
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        clock_display_layout.addWidget(sep)
+
+        # 时钟填充显示模式
+        clock_fill_layout = QHBoxLayout()
+        clock_fill_layout.addWidget(QLabel('填充显示模式:'))
+        self.clock_fill_mode_combo = QComboBox()
+        self.clock_fill_mode_combo.addItem('自适应窗口（按比例缩放）', 'auto_fit')
+        self.clock_fill_mode_combo.addItem('满屏填充（最大化填满）', 'full_fill')
+        self.clock_fill_mode_combo.addItem('等比缩放（保持宽高比）', 'proportional')
+        self.clock_fill_mode_combo.currentIndexChanged.connect(self.change_clock_fill_mode)
+        clock_fill_layout.addWidget(self.clock_fill_mode_combo)
+        clock_display_layout.addLayout(clock_fill_layout)
+
+        # 填充模式说明
+        self.clock_fill_mode_desc = QLabel('自适应窗口：字体根据窗口大小自动缩放，留适当边距')
+        self.clock_fill_mode_desc.setStyleSheet("color: #888; font-size: 11px; padding: 2px 5px;")
+        clock_display_layout.addWidget(self.clock_fill_mode_desc)
+
+        clock_display_group.setLayout(clock_display_layout)
+        layout.addWidget(clock_display_group)
+        layout.addStretch()
+        self.settings_sub_tabs.addTab(tab, "🕐 时钟显示")
+
+    def _create_reset_settings_subtab(self):
+        """创建重置设置子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         reset_group = QGroupBox('重置设置')
-        reset_layout = QHBoxLayout()
-        
+        reset_layout = QVBoxLayout()
+
+        reset_desc = QLabel('将所有设置恢复为程序默认值。\n此操作不可撤销，请谨慎使用。')
+        reset_desc.setStyleSheet("color: #666; padding: 10px;")
+        reset_layout.addWidget(reset_desc)
+
         reset_btn = QPushButton('重置为默认设置')
         reset_btn.clicked.connect(self.reset_settings)
-        reset_btn.setStyleSheet("background-color: #f44336; color: white;")
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                padding: 10px 20px;
+                font-size: 14px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
         reset_layout.addWidget(reset_btn)
-        
+
         reset_group.setLayout(reset_layout)
         layout.addWidget(reset_group)
-        
         layout.addStretch()
-        self.tab_widget.addTab(settings_tab, "⚙️ 设置")
-
-        # 创建NTP时间同步标签页
-        self.create_ntp_tab()
-
-        # 创建关于标签页
-        self.create_about_tab()
-
-    def create_ntp_tab(self):
-        """创建NTP时间同步标签页"""
-        ntp_tab = QWidget()
-        layout = QVBoxLayout(ntp_tab)
-        layout.setSpacing(15)
-        
-        # 标题
-        title_label = QLabel('NTP时间服务器同步设置')
-        title_label.setAlignment(Qt.AlignCenter)
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #2196F3; padding: 10px;")
-        layout.addWidget(title_label)
-        
-        # 说明文字
-        info_label = QLabel('通过NTP（网络时间协议）服务器同步系统时间，确保计时准确性')
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #666; padding: 5px; font-style: italic;")
-        layout.addWidget(info_label)
-        
-        # 主设置区域
-        settings_group = QGroupBox('NTP同步设置')
-        settings_layout = QVBoxLayout()
-        
-        # 启用NTP同步
-        enable_layout = QHBoxLayout()
-        self.ntp_enable_checkbox = QCheckBox('启用NTP时间自动同步')
-        self.ntp_enable_checkbox.stateChanged.connect(self.toggle_ntp_sync)
-        enable_layout.addWidget(self.ntp_enable_checkbox)
-        enable_layout.addStretch()
-        settings_layout.addLayout(enable_layout)
-        
-        settings_layout.addSpacing(10)
-        
-        # 同步间隔设置
-        interval_group = QGroupBox('自动同步间隔')
-        interval_layout = QVBoxLayout()
-        
-        interval_combo_layout = QHBoxLayout()
-        interval_combo_layout.addWidget(QLabel('同步间隔:'))
-        
-        self.ntp_interval_combo = QComboBox()
-        self.ntp_interval_combo.addItems(['15分钟', '30分钟', '1小时', '2小时', '6小时', '12小时', '24小时'])
-        self.ntp_interval_combo.setCurrentText('1小时')
-        self.ntp_interval_combo.currentTextChanged.connect(self.change_ntp_interval)
-        interval_combo_layout.addWidget(self.ntp_interval_combo)
-        interval_combo_layout.addStretch()
-        
-        interval_layout.addLayout(interval_combo_layout)
-        interval_group.setLayout(interval_layout)
-        settings_layout.addWidget(interval_group)
-        
-        settings_layout.addSpacing(10)
-        
-        # 状态显示区域
-        status_group = QGroupBox('同步状态')
-        status_layout = QVBoxLayout()
-        
-        self.ntp_status_label = QLabel('状态: 未同步')
-        self.ntp_status_label.setStyleSheet("color: gray; font-style: italic; font-size: 14px;")
-        status_layout.addWidget(self.ntp_status_label)
-        
-        self.ntp_offset_label = QLabel('时间偏移: 0.000 秒')
-        self.ntp_offset_label.setStyleSheet("color: #666; font-size: 14px;")
-        status_layout.addWidget(self.ntp_offset_label)
-        
-        if self.ntp_last_sync_time:
-            sync_time_label = QLabel(f'上次同步: {self.ntp_last_sync_time.strftime("%Y-%m-%d %H:%M:%S")}')
-            sync_time_label.setStyleSheet("color: #666; font-size: 12px;")
-            status_layout.addWidget(sync_time_label)
-        
-        status_group.setLayout(status_layout)
-        settings_layout.addWidget(status_group)
-        
-        settings_layout.addSpacing(15)
-        
-        # 手动同步按钮
-        sync_buttons_layout = QHBoxLayout()
-        
-        manual_sync_btn = QPushButton('🔄 立即手动同步')
-        manual_sync_btn.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
-        manual_sync_btn.clicked.connect(self.manual_ntp_sync)
-        manual_sync_btn.setMinimumHeight(40)
-        manual_sync_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        sync_buttons_layout.addWidget(manual_sync_btn)
-        
-        test_servers_btn = QPushButton('📡 测试NTP服务器')
-        test_servers_btn.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
-        test_servers_btn.clicked.connect(self.test_ntp_servers)
-        test_servers_btn.setMinimumHeight(40)
-        test_servers_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
-        """)
-        sync_buttons_layout.addWidget(test_servers_btn)
-        
-        settings_layout.addLayout(sync_buttons_layout)
-        
-        settings_group.setLayout(settings_layout)
-        layout.addWidget(settings_group)
-        
-        # NTP服务器列表
-        servers_group = QGroupBox('NTP服务器列表')
-        servers_layout = QVBoxLayout()
-        
-        servers_info = QLabel('可用的NTP时间服务器：')
-        servers_info.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
-        servers_layout.addWidget(servers_info)
-        
-        # 创建服务器列表
-        servers_list = QTextBrowser()
-        servers_list.setMaximumHeight(150)
-        servers_list.setOpenExternalLinks(False)
-        
-        servers_html = "<ul style='margin: 5px; padding-left: 15px;'>"
-        for i, server in enumerate(ProjectInfo.NTP_SERVERS, 1):
-            servers_html += f"<li>{server}</li>"
-        servers_html += "</ul>"
-        
-        servers_list.setHtml(servers_html)
-        servers_list.setReadOnly(True)
-        servers_layout.addWidget(servers_list)
-        
-        # 服务器说明
-        servers_note = QLabel('注意：程序会自动选择响应最快的服务器进行时间同步')
-        servers_note.setStyleSheet("color: #666; font-size: 12px; font-style: italic; margin-top: 5px;")
-        servers_layout.addWidget(servers_note)
-        
-        servers_group.setLayout(servers_layout)
-        layout.addWidget(servers_group)
-        
-        # 使用说明
-        usage_group = QGroupBox('使用说明')
-        usage_layout = QVBoxLayout()
-        
-        usage_text = QTextBrowser()
-        usage_text.setMaximumHeight(120)
-        usage_text.setHtml("""
-        <h4>NTP时间同步功能说明：</h4>
-        <ul>
-        <li><b>启用自动同步</b>：程序会定期从NTP服务器获取准确时间，修正计时器偏差</li>
-        <li><b>时间偏移</b>：显示本地时间与NTP服务器时间的差异，正值表示本地时间比NTP时间快</li>
-        <li><b>测试服务器</b>：可以测试各个NTP服务器的响应速度和可用性</li>
-        <li><b>手动同步</b>：立即执行一次时间同步操作</li>
-        </ul>
-        <p style='color: #f44336;'><b>注意：</b>NTP同步仅修正计时器内部时间，不会修改系统时间。如需修改系统时间，请在操作系统中设置。</p>
-        """)
-        usage_text.setReadOnly(True)
-        usage_layout.addWidget(usage_text)
-        
-        usage_group.setLayout(usage_layout)
-        layout.addWidget(usage_group)
-        
-        layout.addStretch()
-        
-        # 添加到选项卡
-        self.tab_widget.addTab(ntp_tab, "🕒 NTP校时")
-
-
-
+        self.settings_sub_tabs.addTab(tab, "🗑️ 重置")
+    
     # 新增：时间显示标签点击事件处理
     def on_timer_display_clicked(self, event):
         """计时器时间显示标签点击事件"""
@@ -1866,7 +1838,9 @@ class TimerWindow(QMainWindow):
             self.time_display_window.close()
             
         # 创建新窗口
-        self.time_display_window = TimeDisplayWindow(self, timer_type, initial_time)
+        clock_format = self.settings_manager.settings.get('time_display_clock_format', '24h')
+        fill_mode = self.settings_manager.settings.get('time_display_fill_mode', 'auto_fit')
+        self.time_display_window = TimeDisplayWindow(self, timer_type, initial_time, clock_format, fill_mode)
         
         # 加载保存的窗口位置和大小
         saved_geometry = self.settings_manager.settings.get('time_display_window_geometry')
@@ -1874,7 +1848,7 @@ class TimerWindow(QMainWindow):
             self.time_display_window.restoreGeometry(QByteArray.fromHex(saved_geometry.encode()))
         else:
             # 默认位置：主屏幕的右侧
-            screen_geometry = QApplication.desktop().screenGeometry()
+            screen_geometry = QApplication.primaryScreen().geometry()
             default_width = screen_geometry.width() // 3
             default_height = screen_geometry.height() // 2
             x = screen_geometry.width() - default_width - 50
@@ -1991,6 +1965,10 @@ class TimerWindow(QMainWindow):
     def closeEvent(self, event):
         """关闭事件"""
         try:
+            # 新增：停止标题栏时间更新和动态图标
+            self.stop_title_time_update()
+            self.stop_dynamic_icon()
+            
             # 保存时间显示窗口的几何信息
             self.save_time_display_window_geometry()
             
@@ -2042,13 +2020,11 @@ class TimerWindow(QMainWindow):
             # 新增：窗口最小化时显示任务栏进度条
             if self.isMinimized():
                 # 如果计时器正在运行，显示进度条
-                if self.timer_thread and self.timer_thread.isRunning():
+                if self._taskbar_available and self.timer_thread and self.timer_thread.isRunning():
                     self.show_taskbar_progress(True)
-                else:
-                    self.show_taskbar_progress(False)
             else:
                 # 窗口恢复时，如果计时器没有运行，隐藏进度条
-                if not (self.timer_thread and self.timer_thread.isRunning()):
+                if self._taskbar_available and not (self.timer_thread and self.timer_thread.isRunning()):
                     self.show_taskbar_progress(False)
 
     def showEvent(self, event):
@@ -2111,17 +2087,34 @@ class TimerWindow(QMainWindow):
         self.volume_slider.setValue(settings['volume'])
         self.volume_label.setText(f"{settings['volume']}%")
         
-        # 加载铃声设置 - 设置初始化标记
+        # 加载铃声设置
         self._is_initializing = True
         try:
-            if settings['sound_file'] != 'default':
-                self.sound_combo.setCurrentText('自定义铃声...')
-                # 这里会自动触发 change_sound 方法
+            sound_file = settings.get('sound_file', 'default')
+            if sound_file != 'default':
+                if os.path.exists(sound_file):
+                    supported_extensions = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
+                    file_ext = os.path.splitext(sound_file)[1].lower()
+                    if file_ext in supported_extensions:
+                        self.sound_combo.setCurrentText('自定义铃声...')
+                    else:
+                        # 不支持的格式，恢复默认
+                        self.settings_manager.update_setting('sound_file', 'default')
+                        self.sound_combo.setCurrentText('默认铃声')
+                        print(f"不支持的音频格式: {file_ext}，已恢复默认铃声")
+                else:
+                    # 文件不存在，恢复默认
+                    self.settings_manager.update_setting('sound_file', 'default')
+                    self.sound_combo.setCurrentText('默认铃声')
+                    print("自定义铃声文件不存在，已恢复默认铃声")
             else:
                 self.sound_combo.setCurrentText('默认铃声')
         finally:
             self._is_initializing = False
-        
+
+        # 更新声音文件路径显示
+        self._update_sound_file_display()
+
         # 加载窗口置顶设置
         self.always_on_top_checkbox.setChecked(settings['always_on_top'])
         self.toggle_always_on_top()
@@ -2139,11 +2132,25 @@ class TimerWindow(QMainWindow):
         if 'show_alert_dialog' in settings:
             self.alert_dialog_checkbox.setChecked(settings['show_alert_dialog'])
 
+        # 新增：加载时钟显示格式设置
+        clock_format = settings.get('time_display_clock_format', '24h')
+        clock_format_index = self.clock_format_combo.findData(clock_format)
+        if clock_format_index >= 0:
+            self.clock_format_combo.setCurrentIndex(clock_format_index)
+        self._update_clock_format_preview(clock_format)
+
+        # 新增：加载时钟填充显示模式设置
+        fill_mode = settings.get('time_display_fill_mode', 'auto_fit')
+        fill_mode_index = self.clock_fill_mode_combo.findData(fill_mode)
+        if fill_mode_index >= 0:
+            self.clock_fill_mode_combo.setCurrentIndex(fill_mode_index)
+        self._update_fill_mode_desc(fill_mode)
+
         # 加载最近计时器
         self.update_recent_list()
     
     def save_current_settings(self):
-        """保存当前设置"""
+        """保存当前设置（异步后台保存，避免阻塞UI）"""
         self.settings_manager.update_setting('window_geometry', self.saveGeometry().toHex().data().decode())
         self.settings_manager.update_setting('window_state', self.saveState().toHex().data().decode())
         self.settings_manager.update_setting('muted', self.mute_checkbox.isChecked())
@@ -2156,10 +2163,22 @@ class TimerWindow(QMainWindow):
         self.settings_manager.update_setting('window_flash', self.window_flash_checkbox.isChecked())
         self.settings_manager.update_setting('taskbar_flash', self.taskbar_flash_checkbox.isChecked())
         self.settings_manager.update_setting('show_alert_dialog', self.alert_dialog_checkbox.isChecked())
+        # 新增：保存时钟显示格式设置
+        self.settings_manager.update_setting('time_display_clock_format', self.clock_format_combo.currentData())
+        # 新增：保存时钟填充显示模式设置
+        self.settings_manager.update_setting('time_display_fill_mode', self.clock_fill_mode_combo.currentData())
     
     def start_timer(self):
         """开始计时"""
-        print("开始计时器，尝试显示任务栏进度条")
+
+        # 新增：保存原标题
+        if not self.is_showing_time_in_title:
+            self.original_window_title = self.windowTitle()
+            self.is_showing_time_in_title = True
+        
+        # 新增：启动标题栏时间更新定时器
+        self.start_title_time_update()
+    
 
         if self.timer_thread and self.timer_thread.isRunning():
             self.timer_thread.stop()
@@ -2171,11 +2190,7 @@ class TimerWindow(QMainWindow):
         self.timer_state = 'running'
         self.update_timer_display_style()
 
-        # 使用NTP时间（如果启用）
-        use_ntp = self.ntp_sync_enabled
-        self.timer_thread = TimerThread(0, False, use_ntp)
-        self.timer_thread.parent_window = self  # 传递父窗口引用以获取校正时间
-    
+        self.timer_thread = TimerThread(0, False)
         self.timer_thread.update_signal.connect(self.update_timer_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
@@ -2201,7 +2216,6 @@ class TimerWindow(QMainWindow):
         self.status_bar.showMessage('计时器运行中...')
         
         # 新增：显示任务栏进度条（不确定模式）
-        print("调用 show_taskbar_progress 显示进度条")
         self.show_taskbar_progress(True, 'indeterminate')
     
     def pause_timer(self):
@@ -2221,11 +2235,11 @@ class TimerWindow(QMainWindow):
                     self.time_display_window.update_time_style('paused')
             
                 # 新增：暂停时显示黄色进度条
-                if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+                if self._taskbar_available:
                     try:
-                        self.taskbar_progress.pause()
-                    except Exception as e:
-                        print(f"暂停任务栏进度条失败: {e}")
+                        self._set_taskbar_state(0x8)  # TBPF_PAUSED (yellow)
+                    except Exception:
+                        pass
             else:
                 self.timer_thread.resume()
                 self.pause_timer_btn.setText('暂停')
@@ -2240,17 +2254,26 @@ class TimerWindow(QMainWindow):
                     self.time_display_window.update_time_style('running')
             
                 # 新增：恢复时继续显示进度条
-                if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+                if self._taskbar_available:
                     try:
-                        self.taskbar_progress.resume()
-                    except Exception as e:
-                        print(f"恢复任务栏进度条失败: {e}")
+                        self._set_taskbar_state(0x2)  # TBPF_NORMAL
+                    except Exception:
+                        pass
     
+        # 新增：即使暂停，标题栏时间仍然显示当前时间
+        self.update_window_title_time()
+
     def reset_timer(self):
         """重置计时"""
         if self.timer_thread:
             self.timer_thread.stop()
+    
+        # 新增：停止标题栏时间显示
+        self.stop_title_time_update()
         
+        # 新增：停止动态图标
+        self.stop_dynamic_icon()
+    
         self.timer_display.setText('00:00:00')
         self.timer_progress.setValue(0)
     
@@ -2285,6 +2308,24 @@ class TimerWindow(QMainWindow):
             QMessageBox.warning(self, '警告', '请设置大于0的时间')
             return
         
+    
+        # 新增：保存原标题
+        if not self.is_showing_time_in_title:
+            self.original_window_title = self.windowTitle()
+            self.is_showing_time_in_title = True
+        
+        # 新增：启动标题栏时间更新定时器
+        self.start_title_time_update()
+        
+        # 新增：保存原图标
+        if self.original_window_icon is None:
+            self.original_window_icon = self.windowIcon()
+        
+        # 新增：创建并启动动态图标
+        self.create_dynamic_icons(total_seconds)
+        self.start_dynamic_icon()
+    
+
         if self.timer_thread and self.timer_thread.isRunning():
             self.timer_thread.stop()
         
@@ -2302,11 +2343,7 @@ class TimerWindow(QMainWindow):
         if hasattr(self, 'tray_icon'):
             self.tray_icon.setToolTip(f'倒计时: {self.seconds_to_time_str(total_seconds)}')
         
-        # 使用NTP时间（如果启用）
-        use_ntp = self.ntp_sync_enabled
-        self.timer_thread = TimerThread(total_seconds, True, use_ntp)
-        self.timer_thread.parent_window = self  # 传递父窗口引用以获取校正时间
-    
+        self.timer_thread = TimerThread(total_seconds, True)
         self.timer_thread.update_signal.connect(self.update_countdown_display)
         self.timer_thread.alarm_signal.connect(self.alarm_triggered)
         self.timer_thread.start()
@@ -2332,7 +2369,6 @@ class TimerWindow(QMainWindow):
         self.status_bar.showMessage(f'倒计时开始: {self.seconds_to_time_str(total_seconds)}')
         
         # 新增：显示任务栏进度条（确定模式，从0开始）
-        print(f"开始倒计时，显示任务栏进度条，总时长: {total_seconds}秒")
         self.show_taskbar_progress(True, 'determinate')
         self.update_taskbar_progress(0)
         
@@ -2353,11 +2389,11 @@ class TimerWindow(QMainWindow):
                     self.time_display_window.update_time_style('paused')
             
                 # 新增：暂停时显示黄色进度条
-                if self.taskbar_progress:
+                if self._taskbar_available:
                     try:
-                        self.taskbar_progress.pause()
-                    except Exception as e:
-                        print(f"暂停任务栏进度条失败: {e}")
+                        self._set_taskbar_state(0x8)  # TBPF_PAUSED
+                    except Exception:
+                        pass
             else:
                 self.timer_thread.resume()
                 self.pause_countdown_btn.setText('暂停')
@@ -2372,17 +2408,26 @@ class TimerWindow(QMainWindow):
                     self.time_display_window.update_time_style('running')
             
                 # 新增：恢复时继续显示进度条
-                if self.taskbar_progress:
+                if self._taskbar_available:
                     try:
-                        self.taskbar_progress.resume()
-                    except Exception as e:
-                        print(f"恢复任务栏进度条失败: {e}")
+                        self._set_taskbar_state(0x2)  # TBPF_NORMAL
+                    except Exception:
+                        pass
     
+        # 新增：即使暂停，标题栏时间仍然显示当前时间
+        self.update_window_title_time()
+
     def reset_countdown(self):
         """重置倒计时"""
         if self.timer_thread:
             self.timer_thread.stop()
+
+        # 新增：停止标题栏时间显示
+        self.stop_title_time_update()
         
+        # 新增：停止动态图标
+        self.stop_dynamic_icon()
+            
         hours = self.hour_spin.value()
         minutes = self.minute_spin.value()
         seconds = self.second_spin.value()
@@ -2444,7 +2489,7 @@ class TimerWindow(QMainWindow):
             self.tray_icon.setToolTip(f'计时器: {time_str}')
         
         # 新增：更新任务栏进度
-        if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+        if self._taskbar_available:
             # 计时器没有固定时长，使用不确定模式
             if progress >= 100:
                 # 如果超过100%，重置为不确定模式
@@ -2463,7 +2508,7 @@ class TimerWindow(QMainWindow):
             self.tray_icon.setToolTip(f'倒计时: {time_str}')
         
         # 新增：更新任务栏进度
-        if self.taskbar_progress:
+        if self._taskbar_available:
             self.update_taskbar_progress(progress)
     
     # ===== 新增：多种提醒方式 =====
@@ -2495,9 +2540,8 @@ class TimerWindow(QMainWindow):
                 self.shake_animation.setKeyValueAt(key, value)
             
             self.shake_animation.start()
-            print("窗口抖动效果已启动")
-        except Exception as e:
-            print(f"窗口抖动失败: {e}")
+        except Exception:
+            pass
     
     def flash_window(self, times=5, interval=300):
         """窗口闪烁效果"""
@@ -2537,9 +2581,8 @@ class TimerWindow(QMainWindow):
             self.flash_timer = QTimer()
             self.flash_timer.timeout.connect(flash)
             self.flash_timer.start(interval)
-            print("窗口闪烁效果已启动")
-        except Exception as e:
-            print(f"窗口闪烁失败: {e}")
+        except Exception:
+            pass
     
     def flash_taskbar(self, times=10, interval=500):
         """任务栏图标闪烁提醒（仅Windows）"""
@@ -2555,8 +2598,8 @@ class TimerWindow(QMainWindow):
                         else:
                             # 停止闪烁
                             ctypes.windll.user32.FlashWindow(int(self.winId()), False)
-                    except Exception as e:
-                        print(f"FlashWindow调用失败: {e}")
+                    except Exception:
+                        pass
                 
                 # 停止现有的计时器
                 if self.taskbar_timer and self.taskbar_timer.isActive():
@@ -2577,9 +2620,8 @@ class TimerWindow(QMainWindow):
                 
                 self.taskbar_timer.timeout.connect(taskbar_flash)
                 self.taskbar_timer.start(interval)
-                print("任务栏闪烁效果已启动")
-            except Exception as e:
-                print(f"任务栏闪烁失败: {e}")
+            except Exception:
+                pass
     
     def show_system_notification(self, title="时间到！", message="计时器/倒计时已结束"):
         """显示系统通知"""
@@ -2589,15 +2631,13 @@ class TimerWindow(QMainWindow):
                 self.tray_icon.showMessage(
                     title,
                     message,
-                    QSystemTrayIcon.Critical,  # 使用严重级别图标
-                    5000  # 显示5秒
+                    QSystemTrayIcon.Critical,
+                    5000
                 )
-                print("系统通知已发送")
             else:
-                # 如果没有托盘图标，则使用QMessageBox
                 QMessageBox.warning(self, title, message)
-        except Exception as e:
-            print(f"显示系统通知失败: {e}")
+        except Exception:
+            pass
     
     def show_alert_dialog(self):
         """显示更醒目的提醒对话框"""
@@ -2679,17 +2719,16 @@ class TimerWindow(QMainWindow):
             layout.addWidget(button_box)
             
             # 设置对话框位置（屏幕中央）
-            screen_geometry = QApplication.desktop().screenGeometry()
+            screen_geometry = QApplication.primaryScreen().geometry()
             dialog.move(
                 (screen_geometry.width() - dialog.width()) // 2,
                 (screen_geometry.height() - dialog.height()) // 2
             )
             
             # 显示对话框
-            dialog.exec_()
-            print("醒目提醒对话框已显示")
-        except Exception as e:
-            print(f"显示提醒对话框失败: {e}")
+            dialog.exec()
+        except Exception:
+            pass
     
     def test_alarm_effects(self):
         """测试提醒效果"""
@@ -2717,8 +2756,8 @@ class TimerWindow(QMainWindow):
             QTimer.singleShot(2000, lambda: self.mute_checkbox.setChecked(original_mute_state))
             
             self.status_bar.showMessage('提醒效果测试中...')
-        except Exception as e:
-            print(f"测试提醒效果失败: {e}")
+        except Exception:
+            pass
     
     def toggle_window_shake(self, state):
         """切换窗口抖动设置"""
@@ -2739,8 +2778,10 @@ class TimerWindow(QMainWindow):
     def alarm_triggered(self):
         """闹钟触发"""
         try:
-            print("闹钟触发，开始执行提醒效果")
-            
+            # 新增：闹钟触发时恢复原标题和图标
+            self.stop_title_time_update()
+            self.stop_dynamic_icon()
+        
             # 显示窗口到最前面
             self.show_window()
             
@@ -2783,12 +2824,12 @@ class TimerWindow(QMainWindow):
             # ===== 原有功能保持 =====
             
             # 新增：时间到时显示绿色完成状态
-            if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+            if self._taskbar_available:
                 try:
                     self.update_taskbar_progress(100)
                     QTimer.singleShot(3000, lambda: self.show_taskbar_progress(False))
-                except Exception as e:
-                    print(f"设置任务栏完成状态失败: {e}")
+                except Exception:
+                    pass
             
             # 重置对应的控件
             if self.current_timer_type == 'timer':
@@ -2811,68 +2852,42 @@ class TimerWindow(QMainWindow):
                 self.time_display_window.update_time_style('stopped')
             
             self.status_bar.showMessage('时间到！')
-            print("所有提醒效果已执行完毕")
             
         except Exception as e:
-            print(f"闹钟触发过程中出错: {e}")
+            print(f"闹钟触发异常: {e}")
             import traceback
             traceback.print_exc()
         
     def play_alarm_sound(self):
-        """播放闹钟声音"""
+        """播放闹钟声音（QMediaPlayer异步播放，不阻塞UI）"""
         try:
             sound_file = self.settings_manager.settings.get('sound_file', 'default')
             volume = self.settings_manager.settings.get('volume', 100)
-            
+
             if sound_file != 'default' and os.path.exists(sound_file):
                 # 检查文件格式
                 supported_formats = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
                 file_ext = os.path.splitext(sound_file)[1].lower()
-                
+
                 if file_ext in supported_formats:
-                    try:
-                        # 优先使用QMediaPlayer（如果可用）
-                        if self.media_player and hasattr(self.media_player, 'setMedia'):
-                            from PyQt5.QtCore import QUrl
-                            from PyQt5.QtMultimedia import QMediaContent
-                            
-                            # 设置音量
-                            self.media_player.setVolume(volume)
-                            
-                            # 创建媒体内容
-                            media_content = QMediaContent(QUrl.fromLocalFile(sound_file))
-                            self.media_player.setMedia(media_content)
-                            
-                            # 播放
-                            self.media_player.play()
-                            print(f"使用QMediaPlayer播放: {os.path.basename(sound_file)}")
-                            
-                            # 监听播放完成
-                            self.media_player.mediaStatusChanged.connect(
-                                lambda status: print(f"播放状态: {status}")
-                            )
-                            
-                        elif sound_file.lower().endswith('.wav'):
-                            # 回退到QSound（只支持WAV）
-                            sound = QSound(sound_file)
-                            sound.play()
-                            print(f"使用QSound播放WAV文件: {sound_file}")
-                        else:
-                            # 对于其他格式，使用系统默认播放器
-                            print(f"使用系统播放器: {sound_file}")
-                            QApplication.beep()
-                            
-                    except Exception as e:
-                        print(f"播放自定义声音失败: {e}，使用系统提示音")
+                    # 确保音频播放器已初始化
+                    if not self.media_player or not self.audio_output:
+                        self.init_audio_player()
+
+                    if self.media_player and self.audio_output:
+                        # 使用Path确保跨平台路径兼容
+                        safe_path = str(Path(sound_file).resolve())
+                        self.audio_output.setVolume(volume / 100.0)
+                        self.media_player.setSource(QUrl.fromLocalFile(safe_path))
+                        self.media_player.play()
+                    else:
                         QApplication.beep()
                 else:
-                    print(f"不支持的文件格式: {sound_file}，使用系统提示音")
                     QApplication.beep()
             else:
                 # 使用系统提示音
                 QApplication.beep()
-                print("播放默认系统提示音")
-                
+
         except Exception as e:
             print(f"播放声音失败: {e}")
             QApplication.beep()
@@ -2889,29 +2904,43 @@ class TimerWindow(QMainWindow):
     def change_sound(self, sound_name):
         """改变铃声"""
         if sound_name == '自定义铃声...':
-            # 检查是否是程序初始化阶段
-            if hasattr(self, '_is_initializing') and self._is_initializing:
-                # 初始化阶段，直接设置而不弹出对话框
-                sound_file = self.settings_manager.settings.get('sound_file', 'default')
-                if sound_file != 'default' and os.path.exists(sound_file):
-                    # 验证文件格式
-                    supported_extensions = ['.wav', '.mp3', '.ogg', '.flac', '.aac', '.m4a']
-                    file_ext = os.path.splitext(sound_file)[1].lower()
-                    if file_ext not in supported_extensions:
-                        # 不支持的格式，恢复默认
-                        self.settings_manager.update_setting('sound_file', 'default')
-                        self.sound_combo.setCurrentText('默认铃声')
-                        print(f"不支持的音频格式: {file_ext}，已恢复默认铃声")
-                else:
-                    # 文件不存在，恢复默认
-                    self.settings_manager.update_setting('sound_file', 'default')
-                    self.sound_combo.setCurrentText('默认铃声')
-                    print("自定义铃声文件不存在，已恢复默认铃声")
-            else:
-                # 用户交互：打开文件选择对话框
-                self._select_custom_sound()
+            # 用户交互：打开文件选择对话框
+            self._select_custom_sound()
         else:
             self.settings_manager.update_setting('sound_file', 'default')
+
+    def _on_sound_activated(self, index):
+        """用户点击声音下拉框"""
+        text = self.sound_combo.itemText(index)
+        self.change_sound(text)
+
+    def _update_sound_file_display(self):
+        """更新当前铃声文件路径显示"""
+        sound_file = self.settings_manager.settings.get('sound_file', 'default')
+        if sound_file != 'default' and os.path.exists(sound_file):
+            file_size = os.path.getsize(sound_file)
+            size_str = self._format_file_size(file_size)
+            self.sound_file_path_label.setText(
+                f'📁 当前铃声: {sound_file}\n'
+                f'   文件大小: {size_str}'
+            )
+        elif sound_file != 'default' and not os.path.exists(sound_file):
+            self.sound_file_path_label.setText(
+                f'⚠️ 铃声文件不存在: {sound_file}\n'
+                f'   请重新选择铃声文件'
+            )
+        else:
+            self.sound_file_path_label.setText('🔔 当前使用默认系统提示音')
+
+    @staticmethod
+    def _format_file_size(size_bytes):
+        """格式化文件大小"""
+        if size_bytes < 1024:
+            return f'{size_bytes} B'
+        elif size_bytes < 1024 * 1024:
+            return f'{size_bytes / 1024:.1f} KB'
+        else:
+            return f'{size_bytes / (1024 * 1024):.1f} MB'
 
     def _select_custom_sound(self):
         """选择自定义铃声文件"""
@@ -2954,7 +2983,9 @@ class TimerWindow(QMainWindow):
             if file_ext in supported_extensions:
                 self.settings_manager.update_setting('sound_file', file_path)
                 self.status_bar.showMessage(f'已选择自定义铃声: {os.path.basename(file_path)}')
-                
+                # 更新声音文件路径显示
+                self._update_sound_file_display()
+
                 # 测试播放
                 QTimer.singleShot(500, self.test_sound)
             else:
@@ -3123,6 +3154,16 @@ class TimerWindow(QMainWindow):
         else:
             return f"{minutes:02d}:{seconds:02d}"
     
+    def _parse_time_str(self, time_str):
+        """解析时间字符串为总秒数（兼容 HH:MM:SS 和 MM:SS 格式）"""
+        parts = time_str.split(':')
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        else:
+            return 0
+    
     def close_application(self):
         """关闭应用程序"""
         self.save_current_settings()
@@ -3132,178 +3173,176 @@ class TimerWindow(QMainWindow):
         """切换最小化到托盘设置"""
         self.settings_manager.update_setting('minimize_to_tray', bool(state))
 
+    def change_clock_format(self, index):
+        """切换时钟显示格式"""
+        format_key = self.clock_format_combo.currentData()
+        self.settings_manager.update_setting('time_display_clock_format', format_key)
+        self._update_clock_format_preview(format_key)
+        # 如果时间显示窗口已打开，立即更新其格式
+        if self.time_display_window:
+            self.time_display_window.set_clock_format(format_key)
+
+    def change_clock_fill_mode(self, index):
+        """切换时钟填充显示模式"""
+        fill_mode = self.clock_fill_mode_combo.currentData()
+        self.settings_manager.update_setting('time_display_fill_mode', fill_mode)
+        self._update_fill_mode_desc(fill_mode)
+        # 如果时间显示窗口已打开，立即更新其填充模式
+        if self.time_display_window:
+            self.time_display_window.set_fill_mode(fill_mode)
+
+    def _update_fill_mode_desc(self, fill_mode):
+        """更新填充模式说明"""
+        desc_map = {
+            'auto_fit': '自适应窗口：字体根据窗口大小自动缩放，留适当边距',
+            'full_fill': '满屏填充：字体尽可能大，填满整个窗口',
+            'proportional': '等比缩放：保持宽高比缩放，始终完整显示'
+        }
+        self.clock_fill_mode_desc.setText(desc_map.get(fill_mode, ''))
+
+    def _update_clock_format_preview(self, format_key):
+        """更新时钟格式预览标签"""
+        from datetime import datetime
+        now = datetime.now()
+        preview = self._format_time_for_display(now, format_key)
+        format_names = {
+            '24h': '24小时制',
+            '12h': '12小时制',
+            'hm': '仅时分',
+            '12h_hm': '12小时制时分',
+            'ms': '含毫秒',
+            'datetime': '日期+时间'
+        }
+        name = format_names.get(format_key, format_key)
+        self.clock_format_preview.setText(f'格式预览 [{name}]: {preview}')
+
+    @staticmethod
+    def _format_time_for_display(dt, format_key):
+        """根据格式键格式化datetime对象为显示字符串"""
+        if format_key == '24h':
+            return dt.strftime('%H:%M:%S')
+        elif format_key == '12h':
+            return dt.strftime('%I:%M:%S %p')
+        elif format_key == 'hm':
+            return dt.strftime('%H:%M')
+        elif format_key == '12h_hm':
+            return dt.strftime('%I:%M %p')
+        elif format_key == 'ms':
+            return dt.strftime('%H:%M:%S.') + f'{dt.microsecond // 1000:03d}'
+        elif format_key == 'datetime':
+            return dt.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            return dt.strftime('%H:%M:%S')
+
     def init_taskbar_progress(self):
-        """初始化任务栏进度条（Windows特效）"""
-        # 先确保属性存在，即使初始化失败
-        self.taskbar_button = None
-        self.taskbar_progress = None
+        """初始化任务栏进度条（Windows ctypes实现）"""
+        self._taskbar_available = False
+        self._taskbar_hwnd = None
         
         try:
-            # 检查是否在Windows系统上并且支持任务栏进度条
             if sys.platform == 'win32' and HAS_WIN_EXTRAS:
-                print("系统支持Windows任务栏进度条，正在初始化...")
-                
-                # 创建任务栏按钮和进度条
-                self.taskbar_button = QWinTaskbarButton(self)
-                self.taskbar_progress = self.taskbar_button.progress()
-                
-                if self.taskbar_progress:
-                    # 初始化进度条状态
-                    self.taskbar_progress.setVisible(False)
-                    self.taskbar_progress.setRange(0, 100)
-                    self.taskbar_progress.setValue(0)
-                    print(f"Windows任务栏进度条对象创建成功: {self.taskbar_progress}")
-                else:
-                    print("警告: 无法创建任务栏进度条对象")
-            else:
-                if sys.platform != 'win32':
-                    print("非Windows系统，任务栏进度条不可用")
-                elif not HAS_WIN_EXTRAS:
-                    print("Windows系统但缺少QtWinExtras支持，任务栏进度条不可用")
-                    
-        except Exception as e:
-            print(f"初始化任务栏进度条失败: {e}")
-            import traceback
-            traceback.print_exc()
-            # 确保属性为None
-            self.taskbar_button = None
-            self.taskbar_progress = None
+                self._taskbar_available = True
+        except Exception:
+            pass
+
+    def _get_taskbar_hwnd(self):
+        """获取窗口的HWND"""
+        if self._taskbar_hwnd is None:
+            try:
+                self._taskbar_hwnd = int(self.winId())
+            except Exception:
+                pass
+        return self._taskbar_hwnd
+
+    def _set_taskbar_state(self, flags):
+        """通过ITaskbarList3 COM接口设置任务栏状态"""
+        if not self._taskbar_available:
+            return
+        try:
+            hwnd = self._get_taskbar_hwnd()
+            if hwnd is None:
+                return
+            import comtypes.client
+            clsid = comtypes.GUID('{56FDF344-FD6D-11d0-958A-006097C9A090}')
+            taskbar = comtypes.client.CreateObject(clsid,
+                interface=comtypes.gen.taskbarlib.ITaskbarList3)
+            taskbar.HrInit()
+            taskbar.SetProgressState(hwnd, flags)
+        except Exception:
+            pass
 
     def show_taskbar_progress(self, show=True, mode='determinate'):
         """显示或隐藏任务栏进度条"""
-        # 安全检查
-        if not hasattr(self, 'taskbar_progress') or not self.taskbar_progress:
-            print("任务栏进度条不可用，无法显示/隐藏")
+        if not self._taskbar_available:
             return
-            
         try:
             if show:
-                # 确保窗口句柄已设置
-                if hasattr(self.taskbar_button, 'window') and not self.taskbar_button.window():
-                    self.setup_taskbar_window_handle()
-                
-                self.taskbar_progress.setVisible(True)
                 if mode == 'indeterminate':
-                    self.taskbar_progress.setRange(0, 0)  # 不确定模式
-                    self.taskbar_progress.resume()
-                    print("任务栏进度条: 显示不确定模式动画")
+                    self._set_taskbar_state(0x1)  # TBPF_INDETERMINATE
                 elif mode == 'determinate':
-                    self.taskbar_progress.setRange(0, 100)  # 确定模式
-                    self.taskbar_progress.resume()
-                    print("任务栏进度条: 显示确定模式")
+                    self._set_taskbar_state(0x2)  # TBPF_NORMAL
             else:
-                self.taskbar_progress.setVisible(False)
-                self.taskbar_progress.stop()
-                print("任务栏进度条: 隐藏")
-        except Exception as e:
-            print(f"控制任务栏进度条失败: {e}")
-            import traceback
-            traceback.print_exc()
-    
+                self._set_taskbar_state(0x0)  # TBPF_NOPROGRESS
+        except Exception:
+            pass
+
     def update_taskbar_progress(self, value, maximum=100):
-        """更新任务栏进度条（确定模式）
-        
-        Args:
-            value: 当前进度值
-            maximum: 最大值，默认为100
-        """
-        # 安全检查
-        if not hasattr(self, 'taskbar_progress') or not self.taskbar_progress:
-            print("任务栏进度条不可用，无法更新")
+        """更新任务栏进度条（确定模式）"""
+        if not self._taskbar_available:
             return
-            
         try:
-            # 确保进度条可见
-            if not self.taskbar_progress.isVisible():
-                self.taskbar_progress.setVisible(True)
-            
-            # 更新进度值
-            self.taskbar_progress.setRange(0, maximum)
-            self.taskbar_progress.setValue(value)
-            
-            # 确保处于活动状态
-            self.taskbar_progress.resume()
-            
-            print(f"任务栏进度条更新: {value}/{maximum}")
-        except Exception as e:
-            print(f"更新任务栏进度条失败: {e}")
-            import traceback
-            traceback.print_exc()
+            hwnd = self._get_taskbar_hwnd()
+            if hwnd is None:
+                return
+            import comtypes.client
+            clsid = comtypes.GUID('{56FDF344-FD6D-11d0-958A-006097C9A090}')
+            taskbar = comtypes.client.CreateObject(clsid,
+                interface=comtypes.gen.taskbarlib.ITaskbarList3)
+            taskbar.HrInit()
+            taskbar.SetProgressState(hwnd, 0x2)  # TBPF_NORMAL
+            taskbar.SetProgressValue(hwnd, value, maximum)
+        except Exception:
+            pass
 
     def setup_taskbar_window_handle(self):
-        """设置任务栏进度条的窗口句柄"""
-        try:
-            if HAS_WIN_EXTRAS and hasattr(self, 'taskbar_button') and self.taskbar_button:
-                # 获取窗口的本地句柄
-                window_handle = self.windowHandle()
-                if window_handle:
-                    # 设置窗口关联
-                    self.taskbar_button.setWindow(window_handle)
-                    print(f"任务栏进度条窗口关联设置成功: window={window_handle}")
-                    
-                    # 测试进度条功能
-                    QTimer.singleShot(500, self.test_taskbar_progress)
-                else:
-                    print("警告: 无法获取窗口句柄，等待下一次尝试...")
-                    # 延迟重试
-                    QTimer.singleShot(100, self.setup_taskbar_window_handle)
-            else:
-                if not HAS_WIN_EXTRAS:
-                    print("警告: PyQt5.QtWinExtras 不可用")
-                elif not hasattr(self, 'taskbar_button') or not self.taskbar_button:
-                    print("警告: 任务栏按钮未初始化")
-        except Exception as e:
-            print(f"设置任务栏进度条窗口关联失败: {e}")
-            import traceback
-            traceback.print_exc()
+        """设置任务栏进度条的窗口句柄（ctypes无需额外设置）"""
+        self._get_taskbar_hwnd()
 
     def test_taskbar_progress(self):
         """测试任务栏进度条功能"""
-        if hasattr(self, 'taskbar_progress') and self.taskbar_progress:
+        if self._taskbar_available:
             try:
-                # 显示进度条并设置为50%以测试
-                self.taskbar_progress.setVisible(True)
-                self.taskbar_progress.setRange(0, 100)
-                self.taskbar_progress.setValue(50)
-                self.taskbar_progress.resume()
-                
-                print("任务栏进度条测试: 显示50%进度")
-                
-                # 3秒后重置
-                QTimer.singleShot(3000, lambda: self.taskbar_progress.setValue(0))
-                QTimer.singleShot(3000, lambda: self.taskbar_progress.setVisible(False))
-                
-            except Exception as e:
-                print(f"测试任务栏进度条失败: {e}")
+                self.show_taskbar_progress(True, 'determinate')
+                self.update_taskbar_progress(50, 100)
+                QTimer.singleShot(3000, lambda: self.show_taskbar_progress(False))
+            except Exception:
+                pass
 
     def init_audio_player(self):
         """初始化音频播放器"""
         try:
             # 尝试使用QMediaPlayer（支持更多格式）
-            from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-            from PyQt5.QtCore import QUrl
-            
             self.media_player = QMediaPlayer()
-            self.media_player.setVolume(100)
-            print("QMediaPlayer初始化成功，支持更多音频格式")
-        except ImportError as e:
-            print(f"QMediaPlayer不可用: {e}")
+            self.audio_output = QAudioOutput()
+            self.media_player.setAudioOutput(self.audio_output)
+            self.audio_output.setVolume(1.0)  # 默认100%音量（0.0~1.0）
+            # 连接错误信号用于调试
+            self.media_player.errorOccurred.connect(self._on_media_error)
+        except Exception as e:
+            print(f"音频播放器初始化失败: {e}")
             self.media_player = None
+            self.audio_output = None
+
+    def _on_media_error(self, error, error_string):
+        """处理媒体播放器错误"""
+        print(f"媒体播放错误 [{error}]: {error_string}")
+
+    def init_audio_player_async(self):
+        """异步初始化音频播放器（避免阻塞UI启动）"""
+        self.init_audio_player()
 
     def handle_audio_error(self, error):
         """处理音频播放错误"""
-        error_messages = {
-            0: "没有错误",
-            1: "资源错误",
-            2: "格式错误",
-            3: "网络错误",
-            4: "访问被拒绝",
-            5: "服务缺失"
-        }
-        
-        error_msg = error_messages.get(error, f"未知错误: {error}")
-        print(f"音频播放错误: {error_msg}")
-        
         # 回退到系统提示音
         QApplication.beep()
 
@@ -3314,6 +3353,14 @@ class TimerWindow(QMainWindow):
             if self.timer_thread and self.timer_thread.isRunning():
                 self.timer_thread.stop()
                 self.timer_thread.wait(2000)  # 等待2秒
+        
+            # 停止标题栏时间更新
+            if self.title_update_timer and self.title_update_timer.isActive():
+                self.title_update_timer.stop()
+            
+            # 停止动态图标
+            if self.icon_update_timer and self.icon_update_timer.isActive():
+                self.icon_update_timer.stop()
             
             # 停止音频播放
             if self.media_player:
@@ -3443,14 +3490,58 @@ class TimerWindow(QMainWindow):
         self.timer_display.setStyleSheet(style)
 
     def create_about_tab(self):
-        """创建关于标签页"""
+        """创建关于标签页（使用多标签子页整理布局）"""
         about_tab = QWidget()
-        layout = QVBoxLayout(about_tab)
+        main_layout = QVBoxLayout(about_tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 关于子标签页
+        self.about_sub_tabs = QTabWidget()
+        self.about_sub_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                background: #f0f0f0;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border: 1px solid #ccc;
+                border-bottom: none;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                font-weight: bold;
+            }
+        """)
+
+        # ---- 子标签1：概览 ----
+        self._create_about_overview_subtab()
+
+        # ---- 子标签2：版本历史 ----
+        self._create_about_history_subtab()
+
+        # ---- 子标签3：功能与要求 ----
+        self._create_about_features_subtab()
+
+        # ---- 子标签4：帮助 ----
+        self._create_about_help_subtab()
+
+        main_layout.addWidget(self.about_sub_tabs)
+        self.tab_widget.addTab(about_tab, "ℹ️ 关于")
+
+    def _create_about_overview_subtab(self):
+        """创建关于 - 概览子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
         layout.setSpacing(15)
-        
+
         # 项目图标和标题
         header_layout = QHBoxLayout()
-        
+
         # 图标
         if os.path.exists('icon.ico'):
             icon_label = QLabel()
@@ -3458,43 +3549,47 @@ class TimerWindow(QMainWindow):
             icon_label.setPixmap(icon_pixmap)
             header_layout.addWidget(icon_label)
         else:
-            # 使用默认图标
             icon_label = QLabel()
             icon_pixmap = self.style().standardIcon(QStyle.SP_ComputerIcon).pixmap(64, 64)
             icon_label.setPixmap(icon_pixmap)
             header_layout.addWidget(icon_label)
-        
+
         # 标题和版本
         title_layout = QVBoxLayout()
-        
         title_label = QLabel(f"<h2>{ProjectInfo.NAME}</h2>")
         title_label.setTextFormat(Qt.RichText)
         title_layout.addWidget(title_label)
-        
         version_label = QLabel(f"<b>版本:</b> {ProjectInfo.VERSION}")
         version_label.setTextFormat(Qt.RichText)
         title_layout.addWidget(version_label)
-        
         build_label = QLabel(f"<b>构建日期:</b> {ProjectInfo.BUILD_DATE}")
         build_label.setTextFormat(Qt.RichText)
         title_layout.addWidget(build_label)
-        
         header_layout.addLayout(title_layout)
         header_layout.addStretch()
         layout.addLayout(header_layout)
-        
+
         # 分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        layout.addWidget(separator)
-        
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(sep)
+
+        # 功能描述
+        desc_group = QGroupBox("功能简介")
+        desc_layout = QVBoxLayout()
+        desc_text = QTextBrowser()
+        desc_text.setHtml(f"<p>{ProjectInfo.DESCRIPTION.replace(chr(10), '<br>')}</p>")
+        desc_text.setReadOnly(True)
+        desc_layout.addWidget(desc_text)
+        desc_group.setLayout(desc_layout)
+        layout.addWidget(desc_group)
+
         # 作者信息
         author_group = QGroupBox("作者信息")
         author_layout = QVBoxLayout()
-        
         author_info = QTextBrowser()
-        author_info.setMaximumHeight(100)
+        author_info.setMaximumHeight(130)
         author_info.setHtml(f"""
         <p><b>作者:</b> {ProjectInfo.AUTHOR}</p>
         <p><b>许可证:</b> {ProjectInfo.LICENSE}</p>
@@ -3505,33 +3600,46 @@ class TimerWindow(QMainWindow):
         author_info.setOpenExternalLinks(True)
         author_info.setReadOnly(True)
         author_layout.addWidget(author_info)
-        
         author_group.setLayout(author_layout)
         layout.addWidget(author_group)
-        
-        # 版本历史
+
+        layout.addStretch()
+        self.about_sub_tabs.addTab(tab, "ℹ️ 概览")
+
+    def _create_about_history_subtab(self):
+        """创建关于 - 版本历史子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         history_group = QGroupBox("版本历史")
         history_layout = QVBoxLayout()
-        
+
         history_text = QTextBrowser()
-        history_text.setMaximumHeight(200)
         history_html = "<ul>"
-        for version, desc in sorted(ProjectInfo.VERSION_HISTORY.items(), key=lambda x: [int(i) for i in x[0].split('.')]):
+        for version, desc in sorted(ProjectInfo.VERSION_HISTORY.items(),
+                                     key=lambda x: [int(i) for i in x[0].split('.')]):
             history_html += f"<li><b>v{version}:</b> {desc}</li>"
         history_html += "</ul>"
         history_text.setHtml(history_html)
         history_text.setReadOnly(True)
         history_layout.addWidget(history_text)
-        
+
         history_group.setLayout(history_layout)
         layout.addWidget(history_group)
-        
+        layout.addStretch()
+        self.about_sub_tabs.addTab(tab, "📜 版本历史")
+
+    def _create_about_features_subtab(self):
+        """创建关于 - 功能与要求子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
         # 主要功能
         features_group = QGroupBox("主要功能")
         features_layout = QVBoxLayout()
-        
         features_text = QTextBrowser()
-        features_text.setMaximumHeight(150)
         features_html = "<ul>"
         for i, feature in enumerate(ProjectInfo.get_about_info()["features"], 1):
             features_html += f"<li>{feature}</li>"
@@ -3539,46 +3647,60 @@ class TimerWindow(QMainWindow):
         features_text.setHtml(features_html)
         features_text.setReadOnly(True)
         features_layout.addWidget(features_text)
-        
         features_group.setLayout(features_layout)
         layout.addWidget(features_group)
-        
+
         # 系统要求
-        requirements_group = QGroupBox("系统要求")
-        requirements_layout = QVBoxLayout()
-        
-        requirements_text = QTextBrowser()
-        requirements_text.setMaximumHeight(100)
-        requirements_html = "<ul>"
+        req_group = QGroupBox("系统要求")
+        req_layout = QVBoxLayout()
+        req_text = QTextBrowser()
+        req_html = "<ul>"
         for req in ProjectInfo.get_about_info()["system_requirements"]:
-            requirements_html += f"<li>{req}</li>"
-        requirements_html += "</ul>"
-        requirements_text.setHtml(requirements_html)
-        requirements_text.setReadOnly(True)
-        requirements_layout.addWidget(requirements_text)
-        
-        requirements_group.setLayout(requirements_layout)
-        layout.addWidget(requirements_group)
-        
+            req_html += f"<li>{req}</li>"
+        req_html += "</ul>"
+        req_text.setHtml(req_html)
+        req_text.setReadOnly(True)
+        req_layout.addWidget(req_text)
+        req_group.setLayout(req_layout)
+        layout.addWidget(req_group)
+
+        layout.addStretch()
+        self.about_sub_tabs.addTab(tab, "⚡ 功能与要求")
+
+    def _create_about_help_subtab(self):
+        """创建关于 - 帮助子标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
+
+        help_group = QGroupBox("使用帮助")
+        help_layout = QVBoxLayout()
+
+        help_text = QTextBrowser()
+        help_text.setOpenExternalLinks(True)
+        help_text.setHtml(f"<pre>{ProjectInfo.HELP_TEXT}</pre>")
+        help_text.setReadOnly(True)
+        help_layout.addWidget(help_text)
+
+        help_group.setLayout(help_layout)
+        layout.addWidget(help_group)
+
         # 按钮区域
         button_layout = QHBoxLayout()
-        
-        # 查看详细帮助按钮
+
         help_btn = QPushButton("📖 查看详细帮助")
         help_btn.clicked.connect(self.show_help_dialog)
         help_btn.setMinimumHeight(40)
         button_layout.addWidget(help_btn)
-        
-        # 详细关于信息按钮
+
         about_detail_btn = QPushButton("ℹ️ 详细关于信息")
         about_detail_btn.clicked.connect(self.show_about_detail_dialog)
         about_detail_btn.setMinimumHeight(40)
         button_layout.addWidget(about_detail_btn)
-        
+
         layout.addLayout(button_layout)
-        
         layout.addStretch()
-        self.tab_widget.addTab(about_tab, "ℹ️ 关于")
+        self.about_sub_tabs.addTab(tab, "📖 帮助")
         
     def show_help_dialog(self):
         """显示详细帮助对话框"""
@@ -3603,240 +3725,273 @@ class TimerWindow(QMainWindow):
         button_box.rejected.connect(dialog.reject)
         layout.addWidget(button_box)
         
-        dialog.exec_()
+        dialog.exec()
 
     def show_about_detail_dialog(self):
         """显示详细的关于对话框"""
         ProjectInfo.show_about_dialog(self)
 
-    def toggle_ntp_sync(self, state):
-        """切换NTP同步设置"""
-        self.ntp_sync_enabled = bool(state)
+    # 新增方法：标题栏时间显示控制
+    def start_title_time_update(self):
+        """启动标题栏时间更新"""
+        if self.title_update_timer and self.title_update_timer.isActive():
+            self.title_update_timer.stop()
         
-        if state:
-            # 启用自动同步
-            self.start_auto_ntp_sync()
-            self.status_bar.showMessage('NTP时间同步已启用')
-        else:
-            # 禁用自动同步
-            self.stop_auto_ntp_sync()
-            self.status_bar.showMessage('NTP时间同步已禁用')
-
-    def change_ntp_interval(self, interval_text):
-        """改变NTP同步间隔"""
-        interval_map = {
-            '15分钟': 900,
-            '30分钟': 1800,
-            '1小时': 3600,
-            '2小时': 7200,
-            '6小时': 21600,
-            '12小时': 43200,
-            '24小时': 86400
-        }
+        self.title_update_timer = QTimer()
+        self.title_update_timer.timeout.connect(self.update_window_title_time)
+        self.title_update_timer.start(1000)  # 每秒更新一次
         
-        self.ntp_sync_interval = interval_map.get(interval_text, 3600)
-        
-        if self.ntp_sync_enabled:
-            self.stop_auto_ntp_sync()
-            self.start_auto_ntp_sync()
-        
-        self.status_bar.showMessage(f'NTP同步间隔设置为: {interval_text}')
-
-    def start_auto_ntp_sync(self):
-        """开始自动NTP同步"""
-        if self.ntp_sync_timer:
-            self.ntp_sync_timer.stop()
-            self.ntp_sync_timer.start(self.ntp_sync_interval * 1000)
-        
-        # 立即执行一次同步
-        QTimer.singleShot(1000, self.manual_ntp_sync)
-
-    def stop_auto_ntp_sync(self):
-        """停止自动NTP同步"""
-        if self.ntp_sync_timer:
-            self.ntp_sync_timer.stop()
-
-    def manual_ntp_sync(self):
-        """手动执行NTP同步"""
-        try:
-            self.status_bar.showMessage('正在同步NTP时间...')
-            
-            # 在状态标签中显示同步中状态
-            self.ntp_status_label.setText('状态: 同步中...')
-            self.ntp_status_label.setStyleSheet("color: #FF9800; font-style: italic;")
-            
-            # 使用线程执行NTP同步，避免界面冻结
-            sync_thread = threading.Thread(target=self._perform_ntp_sync)
-            sync_thread.daemon = True
-            sync_thread.start()
-            
-        except Exception as e:
-            self.ntp_status_label.setText('状态: 同步失败')
-            self.ntp_status_label.setStyleSheet("color: red; font-style: italic;")
-            self.status_bar.showMessage(f'NTP同步失败: {e}')
-
-    def _perform_ntp_sync(self):
-        """执行NTP同步（在线程中运行）"""
-        try:
-            # 获取NTP时间
-            ntp_result = NTPTimeSync.get_formatted_ntp_time()
-            
-            # 使用信号在GUI线程中更新界面
-            if ntp_result:
-                self.ntp_sync_success.emit(ntp_result)
-            else:
-                self.ntp_sync_failed.emit("无法连接到任何NTP服务器")
-                
-        except Exception as e:
-            self.ntp_sync_failed.emit(str(e))
-
-    def on_ntp_sync_success(self, result):
-        """NTP同步成功处理"""
-        self.ntp_time_offset = result['offset']
-        self.ntp_last_sync_time = datetime.now()
-        
-        # 格式化显示信息
-        offset_str = f"{self.ntp_time_offset:.3f}"
-        if self.ntp_time_offset > 0:
-            offset_display = f"+{offset_str}"
-            color = "green"
-        elif self.ntp_time_offset < 0:
-            offset_display = offset_str
-            color = "red"
-        else:
-            offset_display = offset_str
-            color = "green"
-        
-        # 更新状态标签
-        sync_time_str = self.ntp_last_sync_time.strftime('%H:%M:%S')
-        self.ntp_status_label.setText(f'状态: 已同步 ({sync_time_str})')
-        self.ntp_status_label.setStyleSheet("color: green; font-style: italic;")
-        
-        # 更新偏移量标签
-        self.ntp_offset_label.setText(f'时间偏移: {offset_display} 秒')
-        self.ntp_offset_label.setStyleSheet(f"color: {color};")
-        
-        # 显示详细信息
-        details = f"""NTP同步成功！
-    服务器: {result['server']}
-    网络延迟: {result['latency']*1000:.1f} ms
-    时间偏移: {offset_display} 秒
-    本地时间: {result['formatted_local']}
-    NTP时间: {result['formatted_ntp']}"""
-        
-        self.status_bar.showMessage(f'NTP同步成功，时间偏移: {offset_display} 秒')
-        
-        # 如果偏移量过大，显示警告
-        if abs(self.ntp_time_offset) > 1.0:
-            QMessageBox.warning(self, '时间偏移警告', 
-                f"本地时间与NTP服务器时间偏移较大: {offset_display} 秒\n建议调整系统时间以保证计时准确性。")
-
-    def on_ntp_sync_failed(self, error_msg):
-        """NTP同步失败处理"""
-        self.ntp_status_label.setText('状态: 同步失败')
-        self.ntp_status_label.setStyleSheet("color: red; font-style: italic;")
-        self.ntp_offset_label.setText('时间偏移: 未知')
-        self.ntp_offset_label.setStyleSheet("color: gray;")
-        
-        self.status_bar.showMessage(f'NTP同步失败: {error_msg}')
-        QMessageBox.warning(self, 'NTP同步失败', f"无法同步NTP时间:\n{error_msg}")
-
-    def test_ntp_servers(self):
-        """测试所有NTP服务器"""
-        try:
-            self.status_bar.showMessage('正在测试NTP服务器...')
-            
-            # 在线程中执行测试
-            test_thread = threading.Thread(target=self._perform_server_test)
-            test_thread.daemon = True
-            test_thread.start()
-            
-        except Exception as e:
-            self.status_bar.showMessage(f'测试NTP服务器失败: {e}')
-
-    def _perform_server_test(self):
-        """执行服务器测试（在线程中运行）"""
-        try:
-            results = NTPTimeSync.test_all_servers()
-            self.server_test_complete.emit(results)
-        except Exception as e:
-            self.server_test_complete.emit([{'error': str(e)}])
-
-    def on_server_test_complete(self, results):
-        """服务器测试完成处理"""
-        if results and 'error' in results[0]:
-            QMessageBox.critical(self, '测试错误', f"测试NTP服务器时发生错误:\n{results[0]['error']}")
+    def update_window_title_time(self):
+        """更新窗口标题栏的时间显示"""
+        if not self.is_showing_time_in_title:
             return
         
-        # 创建结果显示对话框
-        dialog = QDialog(self)
-        dialog.setWindowTitle('NTP服务器测试结果')
-        dialog.setMinimumSize(500, 400)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # 创建表格显示结果
-        table = QTableWidget()
-        table.setColumnCount(4)
-        table.setHorizontalHeaderLabels(['服务器', '状态', '延迟(ms)', '偏移(ms)'])
-        table.setRowCount(len(results))
-        
-        available_count = 0
-        best_server = None
-        min_latency = float('inf')
-        
-        for i, result in enumerate(results):
-            table.setItem(i, 0, QTableWidgetItem(result['server']))
-            table.setItem(i, 1, QTableWidgetItem(result['status']))
-            
-            if result['status'] == '可用':
-                available_count += 1
-                latency_ms = result['latency'] * 1000 if result['latency'] else 0
-                offset_ms = result['offset'] * 1000 if result['offset'] else 0
-                
-                table.setItem(i, 2, QTableWidgetItem(f"{latency_ms:.1f}"))
-                table.setItem(i, 3, QTableWidgetItem(f"{offset_ms:.1f}"))
-                
-                # 查找最佳服务器
-                if result['latency'] and result['latency'] < min_latency:
-                    min_latency = result['latency']
-                    best_server = result['server']
-            else:
-                table.setItem(i, 2, QTableWidgetItem('-'))
-                table.setItem(i, 3, QTableWidgetItem('-'))
-        
-        table.resizeColumnsToContents()
-        layout.addWidget(table)
-        
-        # 统计信息
-        stats_label = QLabel(f"可用服务器: {available_count}/{len(results)}")
-        if best_server:
-            stats_label.setText(stats_label.text() + f" | 最佳服务器: {best_server}")
-        
-        layout.addWidget(stats_label)
-        
-        # 按钮
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
-        button_box.accepted.connect(dialog.accept)
-        layout.addWidget(button_box)
-        
-        dialog.exec_()
-        
-        self.status_bar.showMessage(f'NTP服务器测试完成，{available_count}个服务器可用')
-
-    def auto_ntp_sync(self):
-        """自动NTP同步"""
-        if self.ntp_sync_enabled:
-            self.manual_ntp_sync()
-
-    def get_corrected_time(self):
-        """获取经过NTP校正的时间"""
-        if self.ntp_sync_enabled and self.ntp_last_sync_time:
-            # 考虑时间漂移，可以加上自上次同步以来的时间
-            time_since_sync = (datetime.now() - self.ntp_last_sync_time).total_seconds()
-            return systime.time() + self.ntp_time_offset + time_since_sync
+        # 根据当前计时器类型获取时间
+        if self.current_timer_type == 'timer':
+            time_str = self.timer_display.text()
+            prefix = "计时器: "
+        elif self.current_timer_type == 'countdown':
+            time_str = self.countdown_display.text()
+            prefix = "倒计时: "
         else:
-            return systime.time()
+            return
+        
+        # 更新窗口标题
+        new_title = f"{prefix}{time_str} | {self.original_window_title}"
+        self.setWindowTitle(new_title)
+        
+    def stop_title_time_update(self):
+        """停止标题栏时间更新并恢复原标题"""
+        if self.title_update_timer and self.title_update_timer.isActive():
+            self.title_update_timer.stop()
+        
+        if self.is_showing_time_in_title:
+            self.setWindowTitle(self.original_window_title)
+            self.is_showing_time_in_title = False
+
+    def create_dynamic_icons(self, total_seconds):
+        """创建动态倒计时图标帧（简化版，因为我们现在实时创建）"""
+        self.dynamic_icon_frames = []
+        self.total_countdown_seconds = total_seconds
+        
+        # 实际上我们不再需要预创建帧，但保留这个方法以兼容性
+        # 可以预创建几个示例帧作为备用
+        for i in range(11):
+            progress = i / 10.0
+            icon = self.create_progress_icon(progress, True)
+            self.dynamic_icon_frames.append(icon)
+
+    def create_progress_icon(self, progress, is_countdown=True):
+        """创建进度图标（伞型/扇形填充，从12点开始顺时针填充）"""
+        # 创建一个精美的圆形进度图标
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.transparent)
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # 绘制外圈边框（始终存在）
+        painter.setPen(QPen(QColor(100, 100, 100, 180), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(2, 2, 60, 60)
+        
+        # 计算扇形区域
+        center = QPointF(32, 32)
+        radius = 28  # 半径稍小，留出边框空间
+        
+        # 根据进度绘制扇形填充
+        if progress > 0:
+            # 创建扇形路径（从12点开始顺时针）
+            path = QPainterPath()
+            
+            # 起始角度：从12点方向开始（-90度）
+            start_angle = -90  # 度数
+            
+            # 根据进度计算跨越角度（顺时针）
+            span_angle = progress * 360  # 进度对应的角度
+            
+            # 创建扇形
+            path.moveTo(center)
+            
+            # 计算圆弧上的点
+            # 从起始角度开始，到起始角度+span_angle结束
+            # 注意：Qt的坐标系中，0度是3点钟方向，顺时针为正
+            # 但我们想要从12点开始顺时针，所以起始角度是-90度
+            
+            # 创建扇形：moveTo(center) + arcTo + closeSubpath
+            rect = QRectF(center.x() - radius, center.y() - radius, 
+                        radius * 2, radius * 2)
+            
+            # 从起始角度开始，绘制span_angle度的弧
+            # Qt中角度以1/16度为单位，所以需要乘以16
+            path.arcTo(rect, start_angle, span_angle)
+            
+            # 闭合路径到中心点
+            path.closeSubpath()
+            
+            # 根据进度选择填充颜色
+            if is_countdown:
+                if progress < 0.3:
+                    # 0-30%：橙色
+                    color = QColor(255, 87, 34, 200)
+                    gradient_color1 = QColor(255, 140, 100)
+                    gradient_color2 = QColor(255, 87, 34)
+                elif progress < 0.7:
+                    # 30-70%：黄色
+                    color = QColor(255, 193, 7, 200)
+                    gradient_color1 = QColor(255, 213, 79)
+                    gradient_color2 = QColor(255, 193, 7)
+                else:
+                    # 70-100%：绿色
+                    color = QColor(76, 175, 80, 200)
+                    gradient_color1 = QColor(129, 199, 132)
+                    gradient_color2 = QColor(76, 175, 80)
+            else:
+                # 计时器：蓝色
+                color = QColor(33, 150, 243, 200)
+                gradient_color1 = QColor(100, 180, 250)
+                gradient_color2 = QColor(33, 150, 243)
+            
+            # 使用径向渐变让扇形更有立体感
+            gradient = QRadialGradient(center, radius)
+            gradient.setColorAt(0, gradient_color1)
+            gradient.setColorAt(1, gradient_color2)
+            
+            painter.fillPath(path, QBrush(gradient))
+        
+        # 绘制内圈白色区域（中心留白，增加立体感）
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 180)))
+        painter.drawEllipse(center, radius - 8, radius - 8)
+        
+        # 绘制中心点
+        painter.setPen(QPen(QColor(100, 100, 100), 2))
+        painter.setBrush(QBrush(QColor(220, 220, 220)))
+        painter.drawEllipse(center, 4, 4)
+        
+        # 显示当前进度百分比
+        painter.setPen(QPen(QColor(80, 80, 80), 1))
+        font = QFont("Arial", 9, QFont.Bold)
+        painter.setFont(font)
+        
+        percent_text = f"{int(progress * 100)}%"
+        painter.drawText(QRectF(0, 20, 64, 24), Qt.AlignCenter, percent_text)
+        
+        # 如果进度为100%，额外绘制一个完成标记
+        if progress >= 1.0:
+            # 绘制对勾表示完成
+            painter.setPen(QPen(QColor(76, 175, 80), 3))
+            painter.setBrush(Qt.NoBrush)
+            
+            # 画对勾
+            path = QPainterPath()
+            path.moveTo(20, 32)
+            path.lineTo(28, 40)
+            path.lineTo(44, 24)
+            
+            painter.drawPath(path)
+        
+        painter.end()
+        
+        return QIcon(pixmap)
+    
+    def start_dynamic_icon(self):
+        """启动动态图标"""
+        if self.icon_update_timer and self.icon_update_timer.isActive():
+            self.icon_update_timer.stop()
+        
+        self.current_icon_frame = 0
+        self.icon_update_timer = QTimer()
+        self.icon_update_timer.timeout.connect(self.update_dynamic_icon)
+        
+        # 每秒更新10次，实现平滑动画
+        self.icon_update_timer.start(100)  # 100ms = 0.1秒
+        
+    def update_dynamic_icon(self):
+        """更新动态图标"""
+        if not self.timer_thread or not self.timer_thread.isRunning():
+            return
+        
+        # 计算当前进度
+        progress = 0.0
+        is_countdown = (self.current_timer_type == 'countdown')
+        
+        if is_countdown and self.total_countdown_seconds > 0:
+            # 倒计时：基于剩余时间计算进度
+            current_time_str = self.countdown_display.text()
+            remaining_seconds = self._parse_time_str(current_time_str)
+            
+            # 计算已用时间
+            elapsed = self.total_countdown_seconds - remaining_seconds
+            progress = elapsed / self.total_countdown_seconds
+            
+            # 确保进度在0-1之间
+            progress = max(0.0, min(1.0, progress))
+        elif not is_countdown:
+            # 计时器：基于运行时间计算循环进度
+            current_time_str = self.timer_display.text()
+            total_seconds = self._parse_time_str(current_time_str)
+            
+            # 每60秒一个循环
+            progress = (total_seconds % 60) / 60.0
+        
+        # 创建当前进度的图标
+        icon = self.create_progress_icon(progress, is_countdown)
+        self.setWindowIcon(icon)
+        
+    def stop_dynamic_icon(self):
+        """停止动态图标并恢复原图标"""
+        if self.icon_update_timer and self.icon_update_timer.isActive():
+            self.icon_update_timer.stop()
+        
+        if self.original_window_icon:
+            self.setWindowIcon(self.original_window_icon)
+        
+        self.dynamic_icon_frames = []
+        self.current_icon_frame = 0
+
+
+# ===== 多线程工作类 =====
+
+class SettingsSaveWorker(QThread):
+    """设置保存工作线程 - 避免UI卡顿"""
+    finished = Signal(bool)
+    
+    def __init__(self, settings_file, settings_data):
+        super().__init__()
+        self.settings_file = settings_file
+        self.settings_data = settings_data
+    
+    def run(self):
+        """后台保存设置到文件"""
+        try:
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(self.settings_data, f, ensure_ascii=False, indent=2)
+            self.finished.emit(True)
+        except Exception as e:
+            print(f"后台保存设置失败: {e}")
+            self.finished.emit(False)
+
+
+class StartupWorker(QThread):
+    """启动初始化工作线程 - 异步执行耗时初始化任务"""
+    finished = Signal()
+    
+    def __init__(self, parent_window):
+        super().__init__()
+        self.parent = parent_window
+    
+    def run(self):
+        """后台执行启动初始化"""
+        try:
+            # 初始化音频播放器（可能耗时）
+            self.parent.init_audio_player()
+        except Exception as e:
+            print(f"后台初始化失败: {e}")
+        finally:
+            self.finished.emit()
+
 
 def main():
     app = QApplication(sys.argv)
@@ -3849,7 +4004,7 @@ def main():
     window = TimerWindow()
     window.show()
     
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
