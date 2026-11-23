@@ -1,5 +1,7 @@
 # 软件截图 v2.09.1
 
+> **一句话**：多功能计时器：正计时、倒计时与预设时间管理，可另开时间显示窗并缩放 / 全屏 / 最大化，支持 NTP 时间服务器校对。工作计时、学习专注、会议控场时放在桌面上用。PySide6 编写。
+
 <img width="806" height="753" alt="image" src="https://github.com/user-attachments/assets/c861b833-a3c1-4d84-b820-1bd91382b687" />
 
 <img width="800" height="720" alt="image" src="https://github.com/user-attachments/assets/ad9846bd-4b95-405a-a87f-e91833351767" />
